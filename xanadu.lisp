@@ -16,7 +16,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 #|
-(parse-vector (format nil "docname~%me~%doc~%-~%span:add1,start=11,length=66~%span:add2,start=2,length=22~%span:add3,start=3,length=33~%span:add4,start=4,length=44~%link:italics;blah#span:1234,start=1,length=100+foo,start=200,length=11~%link:title;span:add99,start=0,length=10;document#doc:doc-address"))
+(parse-vector (format nil "docname~%me~%doc~%-~%span:1.1,start=11,length=66~%span:1.2,start=2,length=22~%span:1.3,start=3,length=33~%span:1.4,start=4,length=44~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
 
 (parse-doc-contents (cdr (assoc :contents *)))
 |#
@@ -75,7 +75,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	    (cons :contents contents)))))
 
 (defun parse-doc-contents (contents)
-  "Parses the contents part of a leaf as if it were a document returning (list spans links)."
+  "Parses the contents part of a leaf as if it were a document, returning (list spans links)."
   (with-input-from-string (s contents)
     (multiple-value-bind (spans links)
 	(with-collectors (spans links)
@@ -99,9 +99,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (assert (= (length parts) 3))
     (assert (string-starts-with "start=" (second parts)))
     (assert (string-starts-with "length=" (third parts)))
-    (list (first parts) ; address
-	  (subseq (second parts) 6) ; start
-	  (subseq (third parts) 7)))) ; length
+    (list (parse-name (first parts)) ; address
+	  (read-from-string (subseq (second parts) 6)) ; start
+	  (read-from-string (subseq (third parts) 7))))) ; length
 
 (defun parse-link (link)
   (let ((parts (split-sequence #\; link :start 5)))
@@ -125,4 +125,4 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (mapcar #'parse-span-section nested-spans)))
 
 (defun parse-doc (doc)
-  (subseq doc 4))
+  (parse-name (subseq doc 4)))
