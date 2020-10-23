@@ -36,23 +36,23 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defparameter repo+ "~/lisp/xanadu/test-repo")
 
-(defun name-to-path (name) (format nil "~A/~{~A~^/~}" repo+ name))
+(defun name-to-path (ns name) (format nil "~A/~A/~{~A~^/~}" repo+ ns name))
 
-(defun ensure-directories-for-name (name)
-  (ensure-directories-exist (name-to-path name)))
+(defun ensure-directories-for-name (ns name)
+  (ensure-directories-exist (name-to-path ns name)))
 
 (defun make-fillable-string ()
   (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
 
-(defun load-by-name (name)
+(defun load-by-name (ns name)
   (let ((file (make-fillable-string)))
-    (with-open-file (s (name-to-path name))
+    (with-open-file (s (name-to-path ns name))
       (drain s (lambda (c) (vector-push-extend c file)))
       file)))
 
-(defun save-by-name (name contents)
-  (ensure-directories-for-name name)
-  (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
+(defun save-by-name (ns name contents)
+  (ensure-directories-for-name ns name)
+  (with-open-file (s (name-to-path ns name) :direction :output :if-exists :supersede)
     (loop :for c :across contents :do (write-char c s))))
 
 (defun drain (stream constructor)
