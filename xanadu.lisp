@@ -36,7 +36,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defparameter repo+ "~/lisp/xanadu/test-repo")
 
-(defun name-to-path (ns name) (format nil "~A/~A/~A" repo+ ns (print-name name)))
+(defun name-to-path (ns name) (format nil "~A/~A/~A"
+				      repo+ ns (if (stringp name) name (print-name name))))
 
 (defun make-fillable-string ()
   (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
@@ -186,3 +187,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun save-doc (leaf doc)
   (save-by-name "docs" (cdr (assoc :name leaf)) (serialize-doc leaf doc)))
+
+(defun append-local (content)
+  (let ((pathname (uiop:native-namestring (name-to-path "scrolls" "local"))))
+    (prog1
+	(osicat-posix:stat-size (osicat-posix:stat pathname))
+      (with-open-file (s pathname :direction :output :if-exists :append)
+	(princ content s)))))
