@@ -16,7 +16,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 #|
-(parse-vector (format nil "docname~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
+(parse-vector (format nil "1.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
 
 (parse-doc-contents (cdr (assoc :contents *)))
 |#
@@ -49,7 +49,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun save-by-name (ns name contents)
   (with-open-file (s (name-to-path ns name) :direction :output :if-exists :supersede)
-    (loop :for c :across contents :do (write-char c s))))
+    (princ contents s)))
 
 (defun drain (stream constructor)
   (do ((c (read-char stream nil :eof) (read-char stream nil :eof)))
@@ -148,3 +148,41 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun generate-concatatext (doc contents-hash)
   (apply #'concatenate 'string
 	 (mapcar (lambda (s) (apply-span s contents-hash)) (car doc))))
+
+(defun serialize-leaf-header (leaf)
+  (with-output-to-string (s)
+    (flet ((fetch (key) (cdr (assoc key leaf)))
+	   (pr (stuff) (princ stuff s) (fresh-line s)))
+      (pr (print-name (fetch :name)))
+      (pr (fetch :creator))
+      (pr (fetch :type))
+      (pr "-"))))
+
+(defun serialize-leaf (leaf)
+  (concatenate 'string (serialize-leaf-header leaf) (cdr (assoc :contents leaf))))
+
+(defun serialize-doc-contents (doc)
+  (with-output-to-string (s)
+    (dolist (span (car doc))
+      (format s "span:~A~%"(serialize-span-section span)))
+    (dolist (link (cadr doc))
+      (format s "link:~A;~{~A~^;~}~%" (car link) (mapcar #'serialize-endset (cdr link))))))
+
+(defun serialize-doc (leaf doc)
+  (concatenate 'string (serialize-leaf-header leaf) (serialize-doc-contents doc)))
+
+(defun serialize-endset (endset)
+  (with-output-to-string (s)
+    (if (car endset) (format s "~A#" (car endset)))
+    (if (string= (cadr endset) "DOC") (format s "doc:~A" (print-name (third endset)))
+	(format s "span:~{~A~^+~}" (mapcar #'serialize-span-section (third endset))))))
+
+(defun serialize-span-section (section)
+  (format nil "~A,start=~A,length=~A"
+	  (print-name (car section)) (second section) (third section)))
+
+(defun save-contents (leaf)
+  (save-by-name "contents" (cdr (assoc :name leaf)) (serialize-leaf leaf)))
+
+(defun save-doc (leaf doc)
+  (save-by-name "docs" (cdr (assoc :name leaf)) (serialize-doc leaf doc)))
