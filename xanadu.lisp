@@ -194,3 +194,21 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(osicat-posix:stat-size (osicat-posix:stat pathname))
       (with-open-file (s pathname :direction :output :if-exists :append)
 	(princ content s)))))
+
+(defun insert-into-doc (scroll-start length insert-point doc)
+  (let ((new-span (list "local" scroll-start length)))
+    (labels ((rewrite (spans n)
+	       (let ((span (car spans)))
+		 (cond ((zerop n) (cons new-span spans))
+		       ((>= n (third span)) (cons span
+						  (rewrite (cdr spans) (- n (third span)))))
+		       (T (cons (adjust-span-length span n)
+				(cons new-span
+				      (cons (adjust-span-start span n) (cdr spans)))))))))
+      (cons (rewrite (car doc) insert-point) (cdr doc)))))
+
+(defun adjust-span-length (span length)
+  (list (first span) (second span) length))
+
+(defun adjust-span-start (span start-adjust)
+  (list (first span) (+ (second span) start-adjust) (- (third span) start-adjust)))
