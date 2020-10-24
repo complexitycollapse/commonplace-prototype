@@ -16,7 +16,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 #|
-(parse-vector (format nil "docname~%me~%doc~%-~%span:1.1,start=11,length=66~%span:1.2,start=2,length=22~%span:1.3,start=3,length=33~%span:1.4,start=4,length=44~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
+(parse-vector (format nil "docname~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
 
 (parse-doc-contents (cdr (assoc :contents *)))
 |#
@@ -36,10 +36,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defparameter repo+ "~/lisp/xanadu/test-repo")
 
-(defun name-to-path (ns name) (format nil "~A/~A/~{~A~^/~}" repo+ ns name))
-
-(defun ensure-directories-for-name (ns name)
-  (ensure-directories-exist (name-to-path ns name)))
+(defun name-to-path (ns name) (format nil "~A/~A/~A" repo+ ns (print-name name)))
 
 (defun make-fillable-string ()
   (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
@@ -51,7 +48,6 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       file)))
 
 (defun save-by-name (ns name contents)
-  (ensure-directories-for-name ns name)
   (with-open-file (s (name-to-path ns name) :direction :output :if-exists :supersede)
     (loop :for c :across contents :do (write-char c s))))
 
@@ -62,7 +58,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun parse-vector (v)
   (with-input-from-string (s v)
-    (let ((name (read-line s))
+    (let ((name (parse-name (read-line s)))
 	  (creator (read-line s))
 	  (type (read-line s))
 	  (content-separator (read-line s))
@@ -126,3 +122,29 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun parse-doc (doc)
   (parse-name (subseq doc 4)))
+
+(defun get-doc-span-addresses (doc)
+  "Returns all of the addresses contained in all the spans of a document."
+  (mapcar #'car (car doc)))
+
+(defun make-index (key-fn data)
+  "Create an indexing hash table for some data, with a key derived from the data."
+  (let ((hash (make-hash-table :test 'equal)))
+    (dolist (d data) (setf (gethash (funcall key-fn d) hash) d))
+    hash))
+
+(defun load-all-contents (doc)
+  "Create a hash table of all the contents leaves required by a doc's spans, indexed by name."
+  (make-index (lambda (x) (cdr (assoc :name x)))
+	      (mapcar (lambda (a) (parse-vector (load-by-name "contents" a)))
+		      (get-doc-span-addresses doc))))
+
+(defun apply-span (span contents-hash)
+  "Extract the text of a span from a collection of contents leaves."
+  (subseq (cdr (assoc :contents (gethash (car span) contents-hash)))
+	  (second span)
+	  (+ (second span) (third span))))
+
+(defun generate-concatatext (doc contents-hash)
+  (apply #'concatenate 'string
+	 (mapcar (lambda (s) (apply-span s contents-hash)) (car doc))))
