@@ -219,3 +219,20 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun adjust-span-start (span start-adjust)
   (list (first span) (+ (second span) start-adjust) (- (third span) start-adjust)))
+
+(defun extract-content (doc start length)
+  "Create spans representing the content of part of a document delimited by start and length."
+  (labels ((starting (spans n)
+	     (let* ((span (car spans))
+		    (len (third span)))
+	       (cond ((null span) (error "Start is past end of document."))
+		     ((>= n len) (starting (cdr spans) (- n len)))
+		     (T (ending (cons (adjust-span-start span n) (cdr spans)) length)))))
+	   (ending (spans n)
+	     (let* ((span (car spans))
+		    (len (third span)))
+	       (cond ((zerop n) nil)
+		     ((null span) (error "Attempt to extract content past end."))
+		     ((>= n len) (cons span (ending (cdr spans) (- n len))))
+		     (T (list (adjust-span-length span n)))))))
+    (starting (car doc) start)))
