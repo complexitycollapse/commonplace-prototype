@@ -199,15 +199,20 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun insert-into-doc (scroll-start length insert-point doc)
   "Update a document's spans to contain some new material."
   (let ((new-span (list "local" scroll-start length)))
-    (labels ((rewrite (spans n)
-	       (let ((span (car spans)))
-		 (cond ((zerop n) (cons new-span spans))
-		       ((>= n (third span)) (cons span
-						  (rewrite (cdr spans) (- n (third span)))))
-		       (T (cons (adjust-span-length span n)
-				(cons new-span
-				      (cons (adjust-span-start span n) (cdr spans)))))))))
-      (cons (rewrite (car doc) insert-point) (cdr doc)))))
+    (cons (rewrite-spans (car doc) (list new-span) insert-point) (cdr doc))))
+
+(defun transclude-spans (transclusion-spans insert-point doc)
+  "Transclude some material, represented by some spans, into a document."
+  (cons (rewrite-spans (car doc) transclusion-spans insert-point) (cdr doc)))
+
+(defun rewrite-spans (spans new-spans n)
+  (let ((span (car spans)))
+    (cond ((zerop n) (append new-spans spans))
+	  ((endp span) (error "Attempt to insert past end."))
+	  ((>= n (third span))
+	   (cons span (rewrite-spans (cdr spans) new-spans (- n (third span)))))
+	  (T (cons (adjust-span-length span n)
+		   (append new-spans (cons (adjust-span-start span n) (cdr spans))))))))
 
 (defun adjust-span-length (span length)
   (list (first span) (second span) length))
