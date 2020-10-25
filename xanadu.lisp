@@ -203,7 +203,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun transclude-spans (transclusion-spans insert-point doc)
   "Transclude some material, represented by some spans, into a document."
-  (cons (rewrite-spans (car doc) transclusion-spans insert-point) (cdr doc)))
+  (cons (attempt-fuse (rewrite-spans (car doc) transclusion-spans insert-point)) (cdr doc)))
 
 (defun rewrite-spans (spans new-spans n)
   (let ((span (car spans)))
@@ -236,3 +236,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 		     ((>= n len) (cons span (ending (cdr spans) (- n len))))
 		     (T (list (adjust-span-length span n)))))))
     (starting (car doc) start)))
+
+(defun attempt-fuse (spans)
+  (let ((1st (car spans))
+	(2nd (cadr spans)))
+    (cond ((null 1st) nil)
+	  ((null 2nd) spans)
+	  ((and (equal (car 1st) (car 2nd))
+		(= (second 2nd) (+ (second 1st) (third 1st))))
+	   (cons (list (car 1st) (second 1st) (+ (third 1st) (third 2nd)))
+		 (attempt-fuse (cddr spans))))
+	  (T (cons 1st (attempt-fuse (cdr spans)))))))
