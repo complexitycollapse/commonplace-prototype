@@ -25,6 +25,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   `(defun ,name ,args (declare ,@ (mapcar (lambda (a) `(ignore ,a)) args))
 	  (error "Function not implemented ~A" ',name)))
 
+(defmacro probe (form)
+  (with-unique-names (val)
+    `(let ((,val ,form)) (format T ,(format nil "~A: ~~A~%" form) ,val) ,val)))
+
 (defun string-starts-with (prefix string)
   (string= prefix string :end2 (length prefix)))
 
@@ -220,7 +224,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun adjust-span-start (span start-adjust)
   (list (first span) (+ (second span) start-adjust) (- (third span) start-adjust)))
 
-(defun extract-content (doc start length)
+(defun copy-content (doc start length)
   "Create spans representing the content of part of a document delimited by start and length."
   (labels ((starting (spans n)
 	     (let* ((span (car spans))
@@ -249,4 +253,30 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	  (T (cons 1st (attempt-fuse (cdr spans)))))))
 
 (defun transclude (source start length target insert-point)
-  (transclude-spans (extract-content source start length) insert-point target))
+  "Transclude content from one document into another."
+  (transclude-spans (copy-content source start length) insert-point target))
+
+(defun delete-content (doc start length)
+  "Create spans representing the content of part of a document delimited by start and length."
+  (labels ((starting (spans n)
+	     (let* ((span (car spans))
+		    (len (third span)))
+	       (cond ((null span) nil)
+		     ((>= n len) (cons span (starting (cdr spans) (- n len))))
+		     ((zerop n) (start-ending spans n))
+		     (T (cons (adjust-span-length span n)
+			      (start-ending spans n))))))
+	   (start-ending (spans n)
+	     (ending (cons (probe (adjust-span-start (car spans) n))
+					    (probe (cdr spans)))
+				      (probe length))
+	     )
+	   (ending (spans n)
+	     (probe n)
+	     (let* ((span (car spans))
+		    (len (third span)))
+	       (cond ((zerop n) spans)
+		     ((null span) nil)
+		     ((>= n len) (ending (cdr spans) (probe (- n len))))
+		     (T (cons (adjust-span-start (PROBE span) n) (cdr spans)))))))
+    (starting (car doc) start)))
