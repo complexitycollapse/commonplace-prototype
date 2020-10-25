@@ -247,3 +247,6 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	   (cons (list (car 1st) (second 1st) (+ (third 1st) (third 2nd)))
 		 (attempt-fuse (cddr spans))))
 	  (T (cons 1st (attempt-fuse (cdr spans)))))))
+
+(defun transclude (source start length target insert-point)
+  (transclude-spans (extract-content source start length) insert-point target))
