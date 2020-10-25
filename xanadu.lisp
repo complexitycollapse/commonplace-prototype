@@ -189,6 +189,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (save-by-name "docs" (cdr (assoc :name leaf)) (serialize-doc leaf doc)))
 
 (defun append-local (content)
+  "Append some content to the local private scroll and return the start position."
   (let ((pathname (uiop:native-namestring (name-to-path "scrolls" "local"))))
     (prog1
 	(osicat-posix:stat-size (osicat-posix:stat pathname))
@@ -196,6 +197,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(princ content s)))))
 
 (defun insert-into-doc (scroll-start length insert-point doc)
+  "Update a document's spans to contain some new material."
   (let ((new-span (list "local" scroll-start length)))
     (labels ((rewrite (spans n)
 	       (let ((span (car spans)))
