@@ -9,6 +9,7 @@ type
 -
 span:address1,start=1,length=200
 span:address2,start=3,length=100
+span:scroll/local,start=10235,length=40
 
 link:italics;span:address1,start=20,length=10
 link:title;title#span:address2,start=80,length=90;doc#doc:address
@@ -16,10 +17,12 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 #|
-(parse-vector (format nil "1.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
+(parse-vector (format nil "1.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
 
 (parse-doc-contents (cdr (assoc :contents *)))
 |#
+
+(defparameter local-scroll-name+ '(:scroll "local"))
 
 (defmacro not-implemented (name args)
   `(defun ,name ,args (declare ,@ (mapcar (lambda (a) `(ignore ,a)) args))
@@ -30,18 +33,27 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     `(let ((,val ,form)) (format T ,(format nil "~A: ~~A~%" form) ,val) ,val)))
 
 (defun string-starts-with (prefix string)
-  (string= prefix string :end2 (length prefix)))
+  (and (>= (length string) (length prefix))
+       (string= prefix string :end2 (length prefix))))
+
+(defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
 
 (defun print-name (parts)
-  (format nil "~{~A~^.~}" parts))
+  (if (scroll-name-p parts)
+      (format nil "scroll/~A" (cadr parts))
+      (format nil "~{~A~^.~}" parts)))
 
 (defun parse-name (name-string)
-  (mapcar #'read-from-string (split-sequence #\. name-string)))
+  (if (string-starts-with "scroll/" name-string)
+      (list :scroll (subseq name-string 7))
+      (mapcar #'parse-integer (split-sequence #\. name-string))))
 
 (defparameter repo+ "~/lisp/xanadu/test-repo")
 
-(defun name-to-path (ns name) (format nil "~A/~A/~A"
-				      repo+ ns (if (stringp name) name (print-name name))))
+(defun name-to-path (ns name)
+  (if (scroll-name-p name)
+      (format nil "~A/~A/~A" repo+ "scrolls" (cadr name))
+      (format nil "~A/~A/~A" repo+ ns (print-name name))))
 
 (defun make-fillable-string ()
   (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
@@ -192,9 +204,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun save-doc (leaf doc)
   (save-by-name "docs" (cdr (assoc :name leaf)) (serialize-doc leaf doc)))
 
-(defun append-local (content)
+(defun append-to-local-scroll (content)
   "Append some content to the local private scroll and return the start position."
-  (let ((pathname (uiop:native-namestring (name-to-path "scrolls" "local"))))
+  (let ((pathname (uiop:native-namestring (name-to-path "scrolls" local-scroll-name+))))
     (prog1
 	(osicat-posix:stat-size (osicat-posix:stat pathname))
       (with-open-file (s pathname :direction :output :if-exists :append)
@@ -242,6 +254,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (starting (car doc) start)))
 
 (defun attempt-fuse (spans)
+  "Join adjacent spans into a single span if possible."
   (let ((1st (car spans))
 	(2nd (cadr spans)))
     (cond ((null 1st) nil)
