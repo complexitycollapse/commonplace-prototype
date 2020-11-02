@@ -17,12 +17,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 #|
-(parse-vector (format nil "1.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4"))
-
-(parse-doc-contents (cdr (assoc :contents *)))
+(setf foo (parse-vector (format nil "1.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4")))
 |#
 
 (defparameter local-scroll-name+ '(:scroll "local"))
+
+(defstruct leaf name owner type)
+(defstruct (content-leaf (:include leaf)) contents)
+(defstruct (doc (:include leaf)) spans links)
 
 (defmacro not-implemented (name args)
   `(defun ,name ,args (declare ,@ (mapcar (lambda (a) `(ignore ,a)) args))
@@ -76,16 +78,23 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun parse-vector (v)
   (with-input-from-string (s v)
     (let ((name (parse-name (read-line s)))
-	  (creator (read-line s))
+	  (owner (read-line s))
 	  (type (read-line s))
 	  (content-separator (read-line s))
 	  (contents (make-fillable-string)))
       (assert (string= content-separator "-"))
       (drain s (lambda (c) (vector-push-extend c contents)))
-      (list (cons :name name)
-	    (cons :creator creator)
-	    (cons :type type)
-	    (cons :contents contents)))))
+      (if (string= type "doc")
+	  (let ((spans-links (parse-doc-contents contents)))
+	    (make-doc :name name
+		      :owner owner
+		      :type type
+		      :spans (first spans-links)
+		      :links (second spans-links)))
+	  (make-content-leaf :name name
+		             :owner owner
+			     :type type
+			     :contents contents)))))
 
 (defun parse-doc-contents (contents)
   "Parses the contents part of a leaf as if it were a document, returning (list spans links)."
@@ -127,9 +136,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 		       (car name-and-contents)))
 	 (parsed-contents
 	  (cond ((string-starts-with "span:" contents)
-		 (list :span (parse-span-endset contents)))
+                 (list :span (parse-span-endset contents)))
 		((string-starts-with "doc:" contents)
-		 (list :doc (parse-doc contents)))
+                 (list :doc (parse-doc-ref contents)))
 		(T (error "Could not understand endset '~S'" contents)))))
     (cons name parsed-contents)))
 
@@ -137,12 +146,12 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (let ((nested-spans (split-sequence #\+ span :start 5)))
     (mapcar #'parse-span-section nested-spans)))
 
-(defun parse-doc (doc)
+(defun parse-doc-ref (doc)
   (parse-name (subseq doc 4)))
 
 (defun get-doc-span-addresses (doc)
   "Returns all of the addresses contained in all the spans of a document."
-  (mapcar #'car (car doc)))
+  (mapcar #'car (doc-spans doc)))
 
 (defun make-index (key-fn data)
   "Create an indexing hash table for some data, with a key derived from the data."
@@ -152,41 +161,39 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun load-all-contents (doc)
   "Create a hash table of all the contents leaves required by a doc's spans, indexed by name."
-  (make-index (lambda (x) (cdr (assoc :name x)))
+  (make-index (lambda (x) (leaf-name x))
 	      (mapcar (lambda (a) (parse-vector (load-by-name "contents" a)))
 		      (get-doc-span-addresses doc))))
 
 (defun apply-span (span contents-hash)
   "Extract the text of a span from a collection of contents leaves."
-  (subseq (cdr (assoc :contents (gethash (car span) contents-hash)))
+  (subseq (content-leaf-contents (gethash (car span) contents-hash))
 	  (second span)
 	  (+ (second span) (third span))))
 
 (defun generate-concatatext (doc contents-hash)
   (apply #'concatenate 'string
-	 (mapcar (lambda (s) (apply-span s contents-hash)) (car doc))))
+	 (mapcar (lambda (s) (apply-span s contents-hash)) (doc-spans doc))))
 
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
-    (flet ((fetch (key) (cdr (assoc key leaf)))
-	   (pr (stuff) (princ stuff s) (fresh-line s)))
-      (pr (print-name (fetch :name)))
-      (pr (fetch :creator))
-      (pr (fetch :type))
-      (pr "-"))))
+    (princ (print-name (leaf-name leaf)))
+    (princ (leaf-owner leaf))
+    (princ (leaf-type leaf))
+    (princ "-")))
 
-(defun serialize-leaf (leaf)
-  (concatenate 'string (serialize-leaf-header leaf) (cdr (assoc :contents leaf))))
+(defun serialize-content-leaf (leaf)
+  (concatenate 'string (serialize-leaf-header leaf) (content-leaf-contents leaf)))
 
 (defun serialize-doc-contents (doc)
   (with-output-to-string (s)
-    (dolist (span (car doc))
+    (dolist (span (doc-spans doc))
       (format s "span:~A~%"(serialize-span-section span)))
-    (dolist (link (cadr doc))
+    (dolist (link (doc-links doc))
       (format s "link:~A;~{~A~^;~}~%" (car link) (mapcar #'serialize-endset (cdr link))))))
 
-(defun serialize-doc (leaf doc)
-  (concatenate 'string (serialize-leaf-header leaf) (serialize-doc-contents doc)))
+(defun serialize-doc (doc)
+  (concatenate 'string (serialize-leaf-header doc) (serialize-doc-contents doc)))
 
 (defun serialize-endset (endset)
   (with-output-to-string (s)
@@ -199,27 +206,22 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	  (print-name (car section)) (second section) (third section)))
 
 (defun save-contents (leaf)
-  (save-by-name "contents" (cdr (assoc :name leaf)) (serialize-leaf leaf)))
+  (save-by-name "contents" (leaf-name leaf) (serialize-content-leaf leaf)))
 
-(defun save-doc (leaf doc)
-  (save-by-name "docs" (cdr (assoc :name leaf)) (serialize-doc leaf doc)))
+(defun save-doc (doc)
+  (save-by-name "docs" (doc-name doc) (serialize-doc doc)))
 
 (defun append-to-local-scroll (content)
-  "Append some content to the local private scroll and return the start position."
+  "Append some content to the local private scroll and return the span representing it."
   (let ((pathname (uiop:native-namestring (name-to-path "scrolls" local-scroll-name+))))
-    (prog1
-	(osicat-posix:stat-size (osicat-posix:stat pathname))
+    (let ((start (osicat-posix:stat-size (osicat-posix:stat pathname))))
       (with-open-file (s pathname :direction :output :if-exists :append)
-	(princ content s)))))
+	(princ content s))
+      (list (list :scroll "local") start (length content)))))
 
-(defun insert-into-doc (scroll-start length insert-point doc)
-  "Update a document's spans to contain some new material."
-  (let ((new-span (list "local" scroll-start length)))
-    (cons (rewrite-spans (car doc) (list new-span) insert-point) (cdr doc))))
-
-(defun transclude-spans (transclusion-spans insert-point doc)
-  "Transclude some material, represented by some spans, into a document."
-  (cons (attempt-fuse (rewrite-spans (car doc) transclusion-spans insert-point)) (cdr doc)))
+(defun transclude-spans (transclusion-spans insert-point target-spans)
+  "Transclude some material, represented by some spans, into a list of spans."
+  (attempt-fuse (rewrite-spans target-spans transclusion-spans insert-point)))
 
 (defun rewrite-spans (spans new-spans n)
   (let ((span (car spans)))
@@ -236,8 +238,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun adjust-span-start (span start-adjust)
   (list (first span) (+ (second span) start-adjust) (- (third span) start-adjust)))
 
-(defun copy-content (doc start length)
-  "Create spans representing the content of part of a document delimited by start and length."
+(defun extract-spans (spans start length)
+  "Create spans representing the subset of some other spans delimited by start and length."
   (labels ((starting (spans n)
 	     (let* ((span (car spans))
 		    (len (third span)))
@@ -251,7 +253,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 		     ((null span) (error "Attempt to extract content past end."))
 		     ((>= n len) (cons span (ending (cdr spans) (- n len))))
 		     (T (list (adjust-span-length span n)))))))
-    (starting (car doc) start)))
+    (starting spans start)))
 
 (defun attempt-fuse (spans)
   "Join adjacent spans into a single span if possible."
@@ -266,11 +268,13 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	  (T (cons 1st (attempt-fuse (cdr spans)))))))
 
 (defun transclude (source start length target insert-point)
-  "Transclude content from one document into another."
-  (transclude-spans (copy-content source start length) insert-point target))
+  "Transclude content from one document into another, returning the new spans."
+  (transclude-spans (extract-spans (doc-spans source) start length)
+		    insert-point
+		    (doc-spans target)))
 
 (defun delete-content (doc start length)
-  "Create spans representing the content of part of a document delimited by start and length."
+  "Create spans representing the content of part of a document excluding start and length."
   (labels ((starting (spans n)
 	     (let* ((span (car spans))
 		    (len (third span)))
@@ -288,4 +292,4 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 		     ((null span) nil)
 		     ((>= n len) (ending (cdr spans) (- n len)))
 		     (T (cons (adjust-span-start span n) (cdr spans)))))))
-    (starting (car doc) start)))
+    (starting (doc-spans doc) start)))
