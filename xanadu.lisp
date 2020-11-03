@@ -219,9 +219,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(princ content s))
       (list (list :scroll "local") start (length content)))))
 
-(defun insert-spans (doc new-spans n)
-  "Insert a list of spans into the middle of a document."
-  (let ((split (divide-spans (doc-spans doc) 0 n)))
+(defun insert-spans (spans new-spans n)
+  "Insert a list of spans into the middle of some existing spans."
+  (let ((split (divide-spans spans 0 n)))
     (append (first split) new-spans (second split))))
 
 (defun adjust-span-length (span length)
@@ -230,9 +230,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun adjust-span-start (span start-adjust)
   (list (first span) (+ (second span) start-adjust) (- (third span) start-adjust)))
 
-(defun extract-spans (doc start length)
+(defun extract-range-from-spans (spans start length)
   "Create spans representing the subset of some other spans delimited by start and length."
-  (second (divide-spans (doc-spans doc) 0 start (+ start length))))
+  (second (divide-spans spans 0 start (+ start length))))
 
 (defun attempt-fuse (spans)
   "Join adjacent spans into a single span if possible."
@@ -246,14 +246,16 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 		 (attempt-fuse (cddr spans))))
 	  (T (cons 1st (attempt-fuse (cdr spans)))))))
 
-(defun transclude (source start length target insert-point)
-  "Transclude content from one document into another, returning the new spans."
-  (attempt-fuse (insert-spans target (extract-spans source start length) insert-point)))
+(defun transclude (source-spans start length target-spans insert-point)
+  "Transclude content from one set of spans into another."
+  (attempt-fuse
+   (insert-spans target-spans
+		 (extract-range-from-spans source-spans start length) insert-point)))
 
-(defun delete-content (doc start length)
-  "Create spans representing the content of part of a document excluding start and length."
-  (let ((divided (divide-spans (doc-spans doc) 0 start (+ start length))))
-      (append (first divided) (third divided))))
+(defun delete-content (spans start length)
+  "Remove a section from some spans."
+  (let ((divided (divide-spans spans 0 start (+ start length))))
+    (append (first divided) (third divided))))
 
 (defun divide-spans-by-one-point (spans division-point)
   "Divide a list of spans into two lists at the given division point."
