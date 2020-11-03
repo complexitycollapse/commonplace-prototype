@@ -219,18 +219,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(princ content s))
       (list (list :scroll "local") start (length content)))))
 
-(defun transclude-spans (transclusion-spans insert-point target-spans)
-  "Transclude some material, represented by some spans, into a list of spans."
-  (attempt-fuse (rewrite-spans target-spans transclusion-spans insert-point)))
-
-(defun rewrite-spans (spans new-spans n)
-  (let ((span (car spans)))
-    (cond ((zerop n) (append new-spans spans))
-	  ((endp span) (error "Attempt to insert past end."))
-	  ((>= n (third span))
-	   (cons span (rewrite-spans (cdr spans) new-spans (- n (third span)))))
-	  (T (cons (adjust-span-length span n)
-		   (append new-spans (cons (adjust-span-start span n) (cdr spans))))))))
+(defun insert-spans (doc new-spans n)
+  "Insert a list of spans into the middle of a document."
+  (let ((split (divide-spans (doc-spans doc) 0 n)))
+    (append (first split) new-spans (second split))))
 
 (defun adjust-span-length (span length)
   (list (first span) (second span) length))
@@ -238,22 +230,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun adjust-span-start (span start-adjust)
   (list (first span) (+ (second span) start-adjust) (- (third span) start-adjust)))
 
-(defun extract-spans (spans start length)
+(defun extract-spans (doc start length)
   "Create spans representing the subset of some other spans delimited by start and length."
-  (labels ((starting (spans n)
-	     (let* ((span (car spans))
-		    (len (third span)))
-	       (cond ((null span) (error "Start is past end of document."))
-		     ((>= n len) (starting (cdr spans) (- n len)))
-		     (T (ending (cons (adjust-span-start span n) (cdr spans)) length)))))
-	   (ending (spans n)
-	     (let* ((span (car spans))
-		    (len (third span)))
-	       (cond ((zerop n) nil)
-		     ((null span) (error "Attempt to extract content past end."))
-		     ((>= n len) (cons span (ending (cdr spans) (- n len))))
-		     (T (list (adjust-span-length span n)))))))
-    (starting spans start)))
+  (second (divide-spans (doc-spans doc) 0 start (+ start length))))
 
 (defun attempt-fuse (spans)
   "Join adjacent spans into a single span if possible."
@@ -269,27 +248,32 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun transclude (source start length target insert-point)
   "Transclude content from one document into another, returning the new spans."
-  (transclude-spans (extract-spans (doc-spans source) start length)
-		    insert-point
-		    (doc-spans target)))
+  (attempt-fuse (insert-spans target (extract-spans source start length) insert-point)))
 
 (defun delete-content (doc start length)
   "Create spans representing the content of part of a document excluding start and length."
-  (labels ((starting (spans n)
-	     (let* ((span (car spans))
-		    (len (third span)))
-	       (cond ((null span) nil)
-		     ((>= n len) (cons span (starting (cdr spans) (- n len))))
-		     ((zerop n) (start-ending spans n))
-		     (T (cons (adjust-span-length span n)
-			      (start-ending spans n))))))
-	   (start-ending (spans n)
-	     (ending (cons (adjust-span-start (car spans) n) (cdr spans)) length))
-	   (ending (spans n)
-	     (let* ((span (car spans))
-		    (len (third span)))
-	       (cond ((zerop n) spans)
-		     ((null span) nil)
-		     ((>= n len) (ending (cdr spans) (- n len)))
-		     (T (cons (adjust-span-start span n) (cdr spans)))))))
-    (starting (doc-spans doc) start)))
+  (let ((divided (divide-spans (doc-spans doc) 0 start (+ start length))))
+      (append (first divided) (third divided))))
+
+(defun divide-spans-by-one-point (spans division-point)
+  "Divide a list of spans into two lists at the given division point."
+  (let ((before
+	 (with-collectors (before)
+	   (labels ((recur (n)
+		      (let* ((span (car spans))
+			     (len (third span)))
+			(cond ((null spans) nil)
+			      ((>= n len) (before span) (pop spans) (recur (- n len)))
+			      ((zerop n) nil)
+			      (T (pop spans)
+				 (before (adjust-span-length span n))
+				 (push (adjust-span-start span n) spans))))))
+	     (recur division-point)))))
+    (list before spans)))
+
+(defun divide-spans (spans offset &rest division-points)
+  "Divide a list of spans into n lists at the division points."
+  (if (endp division-points) (list spans)
+      (let* ((p (car division-points))
+	     (division (divide-spans-by-one-point spans (- p offset))))
+	(cons (first division) (divide-spans (second division) p (cdr division-points))))))
