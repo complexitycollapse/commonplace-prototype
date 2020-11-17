@@ -22,6 +22,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defparameter local-scroll-name+ '(:scroll "local"))
 
+(defvar acceptor* nil)
+
 (defstruct leaf name owner type)
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) spans links)
@@ -279,3 +281,13 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (let* ((p (car division-points))
 	     (division (divide-spans-by-one-point spans (- p offset))))
 	(cons (first division) (divide-spans (second division) p (cdr division-points))))))
+
+(defun serve ()
+  (if (not acceptor*) (set-acceptor))
+  (hunchentoot:start acceptor*))
+
+(defun set-acceptor ()
+  (setf acceptor* (make-instance 'hunchentoot:easy-acceptor :port 4242)))
+
+(defun stop ()
+  (hunchentoot:stop acceptor*))
