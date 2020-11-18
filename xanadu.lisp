@@ -64,7 +64,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun load-by-name (ns name)
   (let ((file (make-fillable-string)))
-    (with-open-file (s (name-to-path ns name))
+    (with-open-file (s (name-to-path ns name) :if-does-not-exist nil)
+      (if (null s) (return-from load-by-name nil))
       (drain s (lambda (c) (vector-push-extend c file)))
       file)))
 
@@ -283,7 +284,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(cons (first division) (divide-spans (second division) p (cdr division-points))))))
 
 (defun serve ()
-  (if (not acceptor*) (set-acceptor))
+  (if (not acceptor*) (set-acceptor) (stop))
+  (init-acceptor)
   (hunchentoot:start acceptor*))
 
 (defun set-acceptor ()
@@ -291,3 +293,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun stop ()
   (hunchentoot:stop acceptor*))
+
+(defun init-acceptor ()
+  (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
+    (setf (hunchentoot:content-type*) "text/plain") ; how should this be handled?
+    (let ((leaf (load-by-name "contents" (parse-name name))))
+      (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
+      leaf)))
