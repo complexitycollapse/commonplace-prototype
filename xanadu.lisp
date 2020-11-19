@@ -21,6 +21,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 (defparameter local-scroll-name+ '(:scroll "local"))
+(defparameter upstream+ "http://localhost:4242/leaf")
 
 (defvar acceptor* nil)
 
@@ -300,3 +301,15 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (let ((leaf (load-by-name "contents" (parse-name name))))
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
       leaf)))
+
+(defun get-leaf (name)
+  (multiple-value-bind (body status-code headers uri stream must-close reason-phrase)
+      (drakma:http-request
+	upstream+
+	:parameters (list (cons "name" (print-name name))))
+    (declare (ignore headers) (ignore uri) (ignore stream) (ignore must-close))
+    (probe (eql status-code hunchentoot:+http-ok+))
+    (case status-code
+      (404 nil)
+      (200 body)
+      (otherwise (error "Server returned ~A, reason:'~A'" status-code reason-phrase)))))
