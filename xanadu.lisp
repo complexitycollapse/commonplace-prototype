@@ -17,7 +17,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 #|
-(setf foo (parse-vector (format nil "1.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4")))
+(setf foo (parse-vector (format nil "2.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;documentdoc:1.2.3.4")))
 |#
 
 (defparameter local-scroll-name+ '(:scroll "local"))
@@ -55,23 +55,23 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defparameter repo+ "~/lisp/xanadu/test-repo")
 
-(defun name-to-path (ns name)
+(defun name-to-path (name)
   (if (scroll-name-p name)
       (format nil "~A/~A/~A" repo+ "scrolls" (cadr name))
-      (format nil "~A/~A/~A" repo+ ns (print-name name))))
+      (format nil "~A/~A/~A" repo+ "public" (print-name name))))
 
 (defun make-fillable-string ()
   (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
 
-(defun load-by-name (ns name)
+(defun load-by-name (name)
   (let ((file (make-fillable-string)))
-    (with-open-file (s (name-to-path ns name) :if-does-not-exist nil)
+    (with-open-file (s (name-to-path name) :if-does-not-exist nil)
       (if (null s) (return-from load-by-name nil))
       (drain s (lambda (c) (vector-push-extend c file)))
       file)))
 
-(defun save-by-name (ns name contents)
-  (with-open-file (s (name-to-path ns name) :direction :output :if-exists :supersede)
+(defun save-by-name (name contents)
+  (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
     (princ contents s)))
 
 (defun drain (stream constructor)
@@ -166,7 +166,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun load-all-contents (doc)
   "Create a hash table of all the contents leaves required by a doc's spans, indexed by name."
   (make-index (lambda (x) (leaf-name x))
-	      (mapcar (lambda (a) (parse-vector (load-by-name "contents" a)))
+	      (mapcar (lambda (a) (parse-vector (load-by-name a)))
 		      (get-doc-span-addresses doc))))
 
 (defun apply-span (span contents-hash)
@@ -210,14 +210,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	  (print-name (car section)) (second section) (third section)))
 
 (defun save-contents (leaf)
-  (save-by-name "contents" (leaf-name leaf) (serialize-content-leaf leaf)))
+  (save-by-name (leaf-name leaf) (serialize-content-leaf leaf)))
 
 (defun save-doc (doc)
-  (save-by-name "docs" (doc-name doc) (serialize-doc doc)))
+  (save-by-name (doc-name doc) (serialize-doc doc)))
 
 (defun append-to-local-scroll (content)
   "Append some content to the local private scroll and return the span representing it."
-  (let ((pathname (uiop:native-namestring (name-to-path "scrolls" local-scroll-name+))))
+  (let ((pathname (uiop:native-namestring (name-to-path local-scroll-name+))))
     (let ((start (osicat-posix:stat-size (osicat-posix:stat pathname))))
       (with-open-file (s pathname :direction :output :if-exists :append)
 	(princ content s))
@@ -298,14 +298,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun init-acceptor ()
   (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
     (setf (hunchentoot:content-type*) "text/plain") ; how should this be handled?
-    (let ((leaf (load-by-name "contents" (parse-name name))))
+    (let ((leaf (load-by-name (parse-name name))))
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
       leaf)))
 
 (defun cache-leaves (names)
   (with-collectors (not-found)
     (dolist (result (get-leaves names))
-      (if (cdr result) (save-by-name "contents" (car result) (cdr result))
+      (if (cdr result) (save-by-name (car result) (cdr result))
 	  (not-found (car result))))))
 
 (defun get-leaves (names)
