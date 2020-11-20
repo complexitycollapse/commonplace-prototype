@@ -302,14 +302,32 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
       leaf)))
 
-(defun get-leaf (name)
-  (multiple-value-bind (body status-code headers uri stream must-close reason-phrase)
+(defun cache-leaves (names)
+  (with-collectors (not-found)
+    (dolist (result (get-leaves names))
+      (if (cdr result) (save-by-name "contents" (car result) (cdr result))
+	  (not-found (car result))))))
+
+(defun get-leaves (names)
+  (with-collectors (results)
+    (let ((stream nil))
+      (dolist (name names)
+	(multiple-value-bind (leaf new-stream) (get-leaf name (cdr names) stream)
+	  (setf stream new-stream)
+	  (results (cons name leaf)))))))
+
+(defun get-leaf (name keep-alive stream)
+  (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
       (drakma:http-request
 	upstream+
-	:parameters (list (cons "name" (print-name name))))
-    (declare (ignore headers) (ignore uri) (ignore stream) (ignore must-close))
-    (probe (eql status-code hunchentoot:+http-ok+))
+	:parameters (list (cons "name" (print-name name)))
+	:close (not keep-alive)
+	:stream stream)
+    (declare (ignore headers) (ignore uri))
+    (when must-close
+      (close new-stream)
+      (setf new-stream nil))
     (case status-code
-      (404 nil)
-      (200 body)
+      (404 (values nil new-stream))
+      (200 (values body new-stream))
       (otherwise (error "Server returned ~A, reason:'~A'" status-code reason-phrase)))))
