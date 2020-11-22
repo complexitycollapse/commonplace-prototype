@@ -17,13 +17,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 #|
-(setf foo (parse-vector (format nil "2.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;documentdoc:1.2.3.4")))
+(setf foo (parse-vector (format nil "2.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4~%")))
 |#
 
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter upstream+ "http://localhost:4242/leaf")
 
 (defvar acceptor* nil)
+(defvar http-stream*) ; used by the HTTP client to represent an open connection
 
 (defstruct leaf name owner type)
 (defstruct (content-leaf (:include leaf)) contents)
@@ -107,10 +108,12 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(with-collectors (spans links)
 	  (block nil
 	    (loop :do
-		 (multiple-value-bind (line end) (read-line s)
-		   (cond ((string-starts-with "span:" line) (spans (parse-single-span line)))
-			 ((string-starts-with "link:" line) (links (parse-link line)))
-			 (T (error "Could not understand line '~S'" line)))
+		 (multiple-value-bind (line end) (read-line s nil :eof)
+		   (cond
+		     ((eq :eof line))
+		     ((string-starts-with "span:" line) (spans (parse-single-span line)))
+		     ((string-starts-with "link:" line) (links (parse-link line)))
+		     (T (error "Could not understand line '~S'" line)))
 		   (if end (return))))))
       (list spans links))))
 
@@ -165,7 +168,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun load-all-contents (doc)
   "Create a hash table of all the contents leaves required by a doc's spans, indexed by name."
-  (make-index (lambda (x) (leaf-name x))
+  (make-index #'leaf-name
 	      (mapcar (lambda (a) (parse-vector (load-by-name a)))
 		      (get-doc-span-addresses doc))))
 
@@ -308,26 +311,32 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (if (cdr result) (save-by-name (car result) (cdr result))
 	  (not-found (car result))))))
 
+(defun download-folio (doc-name)
+  "Download a doc and all leaves required to make up its spans"
+  (let ((http-stream* nil))
+    (let ((doc (get-leaf doc-name T)))
+      (when doc
+	(save-by-name doc-name doc)
+	(cache-leaves (get-doc-span-addresses (parse-vector doc)))))))
+
 (defun get-leaves (names)
   (with-collectors (results)
-    (let ((stream nil))
-      (dolist (name names)
-	(multiple-value-bind (leaf new-stream) (get-leaf name (cdr names) stream)
-	  (setf stream new-stream)
-	  (results (cons name leaf)))))))
+    (dolist (name names)
+      (results (cons name (get-leaf name (cdr names)))))))
 
-(defun get-leaf (name keep-alive stream)
+(defun get-leaf (name keep-alive)
   (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
       (drakma:http-request
 	upstream+
 	:parameters (list (cons "name" (print-name name)))
 	:close (not keep-alive)
-	:stream stream)
+	:stream http-stream*)
     (declare (ignore headers) (ignore uri))
-    (when must-close
-      (close new-stream)
-      (setf new-stream nil))
+    (cond (must-close
+	   (close http-stream*)
+	   (setf http-stream* nil))
+	  (T (setf http-stream* new-stream)))
     (case status-code
-      (404 (values nil new-stream))
-      (200 (values body new-stream))
+      (404 nil)
+      (200 body)
       (otherwise (error "Server returned ~A, reason:'~A'" status-code reason-phrase)))))
