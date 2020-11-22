@@ -305,6 +305,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
       leaf)))
 
+(defmacro with-http-client (&body body)
+  `(let ((http-stream* (if (boundp 'http-stream*) http-stream* nil)))
+     ,@body))
+
 (defun cache-leaves (names)
   (with-collectors (not-found)
     (dolist (result (get-leaves names))
@@ -313,16 +317,17 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun download-folio (doc-name)
   "Download a doc and all leaves required to make up its spans"
-  (let ((http-stream* nil))
+  (with-http-client
     (let ((doc (get-leaf doc-name T)))
       (when doc
 	(save-by-name doc-name doc)
 	(cache-leaves (get-doc-span-addresses (parse-vector doc)))))))
 
 (defun get-leaves (names)
-  (with-collectors (results)
-    (dolist (name names)
-      (results (cons name (get-leaf name (cdr names)))))))
+  (with-http-client
+    (with-collectors (results)
+      (dolist (name names)
+	(results (cons name (get-leaf name (cdr names))))))))
 
 (defun get-leaf (name keep-alive)
   (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
