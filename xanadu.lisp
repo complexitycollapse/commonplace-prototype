@@ -22,9 +22,16 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter upstream+ "http://localhost:4242/leaf")
+(defparameter test-repo+ (list :absolute :home "lisp" "xanadu" "test-repo"))
 
 (defvar acceptor* nil)
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
+(defvar repo-path* ; defaults to current directory
+  (pathname-directory (sb-ext:parse-native-namestring
+		       (sb-posix:getcwd)
+		       nil
+		       *default-pathname-defaults*
+		       :as-directory T)))
 
 (defstruct leaf name owner type)
 (defstruct (content-leaf (:include leaf)) contents)
@@ -42,6 +49,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (and (>= (length string) (length prefix))
        (string= prefix string :end2 (length prefix))))
 
+(defun set-test-repo ()
+  (setf repo-path* test-repo+))
+
 (defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
 
 (defun print-name (parts)
@@ -49,17 +59,20 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (format nil "scroll/~A" (cadr parts))
       (format nil "~{~A~^.~}" parts)))
 
+(defun to-file-name (parts)
+  (if (scroll-name-p parts)
+      (cadr parts)
+      (format nil "~{~A~^_~}" parts)))
+
 (defun parse-name (name-string)
   (if (string-starts-with "scroll/" name-string)
       (list :scroll (subseq name-string 7))
       (mapcar #'parse-integer (split-sequence #\. name-string))))
 
-(defparameter repo+ "~/lisp/xanadu/test-repo")
-
 (defun name-to-path (name)
-  (if (scroll-name-p name)
-      (format nil "~A/~A/~A" repo+ "scrolls" (cadr name))
-      (format nil "~A/~A/~A" repo+ "public" (print-name name))))
+  (let ((subdirectory (if (scroll-name-p name) "scrolls" "public")))
+    (make-pathname :directory (append repo-path* (list subdirectory))
+		   :name (to-file-name name))))
 
 (defun make-fillable-string ()
   (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
@@ -287,6 +300,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	     (division (divide-spans-by-one-point spans (- p offset))))
 	(cons (first division) (divide-spans (second division) p (cdr division-points))))))
 
+;;; Server
+
 (defun serve ()
   (if (not acceptor*) (set-acceptor) (stop))
   (init-acceptor)
@@ -305,31 +320,38 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
       leaf)))
 
+;;; Client
+
 (defmacro with-http-client (&body body)
   `(let ((http-stream* (if (boundp 'http-stream*) http-stream* nil)))
      ,@body))
 
-(defun cache-leaves (names)
+(defun leaf-missing (name)
+  (not (probe-file (name-to-path name))))
+
+(defun ensure-leaf (name keep-alive)
+  "Make sure a leaf is in the cache, and return its contents"
+  (if (leaf-missing name)
+      (let ((leaf (get-leaf-from-server name keep-alive)))
+	(if leaf (save-by-name name leaf))
+	leaf)
+      (load-by-name name)))
+
+(defun ensure-leaves (names)
+  "Makes sure a list of leaves are in the cache, returning those that could not be retrieved"
   (with-collectors (not-found)
-    (dolist (result (get-leaves names))
-      (if (cdr result) (save-by-name (car result) (cdr result))
-	  (not-found (car result))))))
+    (with-http-client
+      (dolist (name names)
+	(if (not (ensure-leaf name T)) (not-found name))))))
 
 (defun download-folio (doc-name)
-  "Download a doc and all leaves required to make up its spans"
+  "Download a doc and all leaves required to make up its spans, returns those that weren't found"
   (with-http-client
-    (let ((doc (get-leaf doc-name T)))
+    (let ((doc (ensure-leaf doc-name T)))
       (when doc
-	(save-by-name doc-name doc)
-	(cache-leaves (get-doc-span-addresses (parse-vector doc)))))))
+	(ensure-leaves (get-doc-span-addresses (parse-vector doc)))))))
 
-(defun get-leaves (names)
-  (with-http-client
-    (with-collectors (results)
-      (dolist (name names)
-	(results (cons name (get-leaf name (cdr names))))))))
-
-(defun get-leaf (name keep-alive)
+(defun get-leaf-from-server (name keep-alive)
   (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
       (drakma:http-request
 	upstream+
@@ -338,7 +360,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	:stream http-stream*)
     (declare (ignore headers) (ignore uri))
     (cond (must-close
-	   (close http-stream*)
+	   (if http-stream* (close http-stream*))
 	   (setf http-stream* nil))
 	  (T (setf http-stream* new-stream)))
     (case status-code
