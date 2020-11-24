@@ -329,27 +329,27 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun leaf-missing (name)
   (not (probe-file (name-to-path name))))
 
-(defun ensure-leaf (name keep-alive)
+(defun ensure-leaf (name keep-alive &optional force-download)
   "Make sure a leaf is in the cache, and return its contents"
-  (if (leaf-missing name)
+  (if (or force-download (leaf-missing name))
       (let ((leaf (get-leaf-from-server name keep-alive)))
 	(if leaf (save-by-name name leaf))
 	leaf)
       (load-by-name name)))
 
-(defun ensure-leaves (names)
+(defun ensure-leaves (names &optional force-download)
   "Makes sure a list of leaves are in the cache, returning those that could not be retrieved"
   (with-collectors (not-found)
     (with-http-client
       (dolist (name names)
-	(if (not (ensure-leaf name T)) (not-found name))))))
+	(if (not (ensure-leaf name T force-download)) (not-found name))))))
 
-(defun download-folio (doc-name)
+(defun download-folio (doc-name &optional force-download)
   "Download a doc and all leaves required to make up its spans, returns those that weren't found"
   (with-http-client
-    (let ((doc (ensure-leaf doc-name T)))
+    (let ((doc (ensure-leaf doc-name T force-download)))
       (when doc
-	(ensure-leaves (get-doc-span-addresses (parse-vector doc)))))))
+	(ensure-leaves (get-doc-span-addresses (parse-vector doc)) force-download)))))
 
 (defun get-leaf-from-server (name keep-alive)
   (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
