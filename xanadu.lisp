@@ -52,15 +52,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (if (string= #\/ (elt part last)) (setf part (subseq part 0 last))))
     (concatenate 'string part (if (cdr parts) "/" "") (apply #'merge-url (cdr parts)))))
 
+;;; Repo management
+
 (defun set-test-repo ()
   (setf repo-path* test-repo+))
-
-(defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
-
-(defun print-name (parts)
-  (if (scroll-name-p parts)
-      (format nil "scroll/~A" (cadr parts))
-      (format nil "~{~A~^.~}" parts)))
 
 (defun to-file-name (parts)
   (if (scroll-name-p parts)
@@ -72,14 +67,25 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (list :scroll (subseq name-string 7))
       (mapcar #'parse-integer (split-sequence #\. name-string))))
 
-(defun name-to-path (name)
-  (let ((subdirectory (if (scroll-name-p name) "scrolls/" "public/")))
-    (cl-fad:merge-pathnames-as-file (cl-fad:pathname-as-directory repo-path*)
-				    subdirectory
-				    (to-file-name name))))
+(defun scrolls-path ()
+  (cl-fad:merge-pathnames-as-directory (cl-fad:pathname-as-directory repo-path*) "scrolls/"))
 
-(defun make-fillable-string ()
-  (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
+(defun public-path ()
+  (cl-fad:merge-pathnames-as-directory (cl-fad:pathname-as-directory repo-path*) "public/"))
+
+(defun name-to-path (name)
+  (let ((subdirectory (if (scroll-name-p name) (scrolls-path) (public-path))))
+    (cl-fad:merge-pathnames-as-file subdirectory (to-file-name name))))
+
+(defun init ()
+  (ensure-directories-exist (public-path))
+  (ensure-directories-exist (scrolls-path))
+  (with-open-file (s (name-to-path local-scroll-name+)
+		     :direction :output :if-exists :overwrite :if-does-not-exist :create)
+    (write-line "scroll/local" s)
+    (write-line "Me" s)
+    (write-line "scroll" s)
+    (write-line "-" s)))
 
 (defun load-by-name (name)
   (let ((file (make-fillable-string)))
@@ -91,6 +97,18 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun save-by-name (name contents)
   (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
     (princ contents s)))
+
+;;; Leaf processing
+
+(defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
+
+(defun print-name (parts)
+  (if (scroll-name-p parts)
+      (format nil "scroll/~A" (cadr parts))
+      (format nil "~{~A~^.~}" parts)))
+
+(defun make-fillable-string ()
+  (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
 
 (defun drain (stream constructor)
   (do ((c (read-char stream nil :eof) (read-char stream nil :eof)))
@@ -317,8 +335,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun stop ()
   (hunchentoot:stop acceptor*))
 
-(defun init-acceptor ()
-  (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
+(defun init-acceptor ()  (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
     (setf (hunchentoot:content-type*) "text/plain") ; how should this be handled?
     (let ((leaf (load-by-name (parse-name name))))
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
