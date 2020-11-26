@@ -21,17 +21,12 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 (defparameter local-scroll-name+ '(:scroll "local"))
-(defparameter upstream+ "http://localhost:4242/leaf")
-(defparameter test-repo+ (list :absolute :home "lisp" "xanadu" "test-repo"))
+(defparameter upstream+ "http://localhost:4242/")
+(defparameter test-repo+ "~/lisp/xanadu/test-repo")
 
 (defvar acceptor* nil)
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
-(defvar repo-path* ; defaults to current directory
-  (pathname-directory (sb-ext:parse-native-namestring
-		       (sb-posix:getcwd)
-		       nil
-		       *default-pathname-defaults*
-		       :as-directory T)))
+(defvar repo-path* (sb-posix:getcwd)) ; defaults to current directory
 
 (defstruct leaf name owner type)
 (defstruct (content-leaf (:include leaf)) contents)
@@ -48,6 +43,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun string-starts-with (prefix string)
   (and (>= (length string) (length prefix))
        (string= prefix string :end2 (length prefix))))
+
+(defun merge-url (&rest parts)
+  (if (endp parts) (return-from merge-url ""))
+  (let ((part (car parts)))
+    (if (string-starts-with "/" part) (setf part (subseq part 1)))
+    (let ((last (1- (length part))))
+      (if (string= #\/ (elt part last)) (setf part (subseq part 0 last))))
+    (concatenate 'string part (if (cdr parts) "/" "") (apply #'merge-url (cdr parts)))))
 
 (defun set-test-repo ()
   (setf repo-path* test-repo+))
@@ -70,9 +73,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (mapcar #'parse-integer (split-sequence #\. name-string))))
 
 (defun name-to-path (name)
-  (let ((subdirectory (if (scroll-name-p name) "scrolls" "public")))
-    (make-pathname :directory (append repo-path* (list subdirectory))
-		   :name (to-file-name name))))
+  (let ((subdirectory (if (scroll-name-p name) "scrolls/" "public/")))
+    (cl-fad:merge-pathnames-as-file (cl-fad:pathname-as-directory repo-path*)
+				    subdirectory
+				    (to-file-name name))))
 
 (defun make-fillable-string ()
   (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
@@ -302,13 +306,13 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 ;;; Server
 
-(defun serve ()
-  (if (not acceptor*) (set-acceptor) (stop))
+(defun serve (&optional (port 4242))
+  (if (not acceptor*) (set-acceptor port) (stop))
   (init-acceptor)
   (hunchentoot:start acceptor*))
 
-(defun set-acceptor ()
-  (setf acceptor* (make-instance 'hunchentoot:easy-acceptor :port 4242)))
+(defun set-acceptor (port)
+  (setf acceptor* (make-instance 'hunchentoot:easy-acceptor :port port)))
 
 (defun stop ()
   (hunchentoot:stop acceptor*))
@@ -354,7 +358,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun get-leaf-from-server (name keep-alive)
   (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
       (drakma:http-request
-	upstream+
+       (merge-url upstream+ "leaf")
 	:parameters (list (cons "name" (print-name name)))
 	:close (not keep-alive)
 	:stream http-stream*)

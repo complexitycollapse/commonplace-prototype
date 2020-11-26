@@ -6,6 +6,6 @@
   :license  "Specify license here"
   :version "0.0.1"
   :serial t
-  :depends-on (:cl-utilities :osicat :hunchentoot :drakma)
+  :depends-on (:cl-utilities :osicat :hunchentoot :drakma :cl-fad)
   :components ((:file "package")
                (:file "xanadu")))
