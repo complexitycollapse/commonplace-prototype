@@ -23,6 +23,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter upstream+ "http://localhost:4242/")
 (defparameter test-repo+ "~/lisp/xanadu/test-repo")
+(defparameter user+ "Me")
 
 (defvar acceptor* nil)
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
@@ -83,7 +84,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (with-open-file (s (name-to-path local-scroll-name+)
 		     :direction :output :if-exists :overwrite :if-does-not-exist :create)
     (write-line "scroll/local" s)
-    (write-line "Me" s)
+    (write-line user+ s)
     (write-line "scroll" s)
     (write-line "-" s)))
 
@@ -114,6 +115,21 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (do ((c (read-char stream nil :eof) (read-char stream nil :eof)))
 	  ((eq c :eof))
 	(funcall constructor c)))
+
+(defun new-content-leaf (name type text)
+  (make-content-leaf :name name :owner user+ :type type :contents text))
+
+(defun new-doc-leaf (name type)
+  (make-doc :name name :owner user+ :type type :spans nil :links nil))
+
+(defun create-content-from-file (name type path)
+  "Import text from a file"
+  (let ((contents (make-fillable-string)))
+    (with-open-file (s path)
+      (loop for c = (read-char s nil)
+	 while c
+	 do (vector-push-extend c contents)))
+    (new-content-leaf name type contents)))
 
 (defun parse-vector (v)
   (with-input-from-string (s v)
