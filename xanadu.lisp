@@ -233,6 +233,11 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (apply #'concatenate 'string
 	 (mapcar (lambda (s) (apply-span s contents-hash)) (doc-spans doc))))
 
+(defun generate-concatatext-clip (doc contents-hash start length)
+    (apply #'concatenate 'string
+	 (mapcar (lambda (s) (apply-span s contents-hash))
+		 (extract-range-from-spans (doc-spans doc) start length))))
+
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
     (princ (print-name (leaf-name leaf)))
@@ -331,12 +336,13 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	     (recur division-point)))))
     (list before spans)))
 
-(defun divide-spans (spans offset &rest division-points)
+(defun divide-spans (spans 1st-division-point &rest other-division-points)
   "Divide a list of spans into n lists at the division points."
-  (if (endp division-points) (list spans)
-      (let* ((p (car division-points))
-	     (division (divide-spans-by-one-point spans (- p offset))))
-	(cons (first division) (divide-spans (second division) p (cdr division-points))))))
+  (if (endp other-division-points) (list spans)
+      (let* ((p (car other-division-points))
+	     (division (divide-spans-by-one-point spans (- p 1st-division-point))))
+	(cons (first division)
+	      (apply #'divide-spans (second division) p (cdr other-division-points))))))
 
 ;;; Server
 
