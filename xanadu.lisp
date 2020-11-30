@@ -32,6 +32,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defstruct leaf name owner type)
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) spans links)
+(defstruct span origin start length)
 
 (defmacro not-implemented (name args)
   `(defun ,name ,args (declare ,@ (mapcar (lambda (a) `(ignore ,a)) args))
@@ -122,6 +123,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun new-doc-leaf (name type)
   (make-doc :name name :owner user+ :type type :spans nil :links nil))
 
+(defun span (origin start length) (make-span :origin origin :start start :length length))
+
 (defun create-content-from-file (name type path)
   "Import text from a file"
   (let ((contents (make-fillable-string)))
@@ -162,8 +165,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 		 (multiple-value-bind (line end) (read-line s nil :eof)
 		   (cond
 		     ((eq :eof line))
-		     ((string-starts-with "span:" line) (spans (parse-single-span line)))
-		     ((string-starts-with "link:" line) (links (parse-link line)))
+		     ((string-starts-with "span:" line) (spans (parse-span-line line)))
+		     ((string-starts-with "link:" line) (links (parse-link-include line)))
 		     (T (error "Could not understand line '~S'" line)))
 		   (if end (return))))))
       (list spans links))))
@@ -171,7 +174,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun split-span-into-parts (span)
   (split-sequence #\space span))
 
-(defun parse-single-span (span)
+(defun parse-span-line (span)
   (parse-span-section (subseq span 5)))
 
 (defun parse-span-section (section)
@@ -179,11 +182,11 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (assert (= (length parts) 3))
     (assert (string-starts-with "start=" (second parts)))
     (assert (string-starts-with "length=" (third parts)))
-    (list (parse-name (first parts)) ; address
-	  (read-from-string (subseq (second parts) 6)) ; start
-	  (read-from-string (subseq (third parts) 7))))) ; length
+    (span (parse-name (first parts))
+	   (read-from-string (subseq (second parts) 6))
+	  (read-from-string (subseq (third parts) 7)))))
 
-(defun parse-link (link)
+(defun parse-link-include (link)
   (let ((parts (split-sequence #\; link :start 5)))
     (cons (car parts) (mapcar #'parse-endset (cdr parts)))))
 
@@ -209,7 +212,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun get-doc-span-addresses (doc)
   "Returns all of the addresses contained in all the spans of a document."
-  (mapcar #'car (doc-spans doc)))
+  (mapcar #'span-origin (doc-spans doc)))
 
 (defun make-index (key-fn data)
   "Create an indexing hash table for some data, with a key derived from the data."
@@ -225,9 +228,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun apply-span (span contents-hash)
   "Extract the text of a span from a collection of contents leaves."
-  (subseq (content-leaf-contents (gethash (car span) contents-hash))
-	  (second span)
-	  (+ (second span) (third span))))
+  (subseq (content-leaf-contents (gethash (span-origin span) contents-hash))
+	  (span-start span)
+	  (+ (span-start span) (span-length span))))
 
 (defun generate-concatatext (doc contents-hash)
   (apply #'concatenate 'string
@@ -240,10 +243,11 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
-    (princ (print-name (leaf-name leaf)))
-    (princ (leaf-owner leaf))
-    (princ (leaf-type leaf))
-    (princ "-")))
+    (labels ((p (str) (format s "~A~%" str)))
+      (p (print-name (leaf-name leaf)))
+      (p (leaf-owner leaf))
+      (p (leaf-type leaf))
+      (p "-"))))
 
 (defun serialize-content-leaf (leaf)
   (concatenate 'string (serialize-leaf-header leaf) (content-leaf-contents leaf)))
@@ -266,7 +270,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun serialize-span-section (section)
   (format nil "~A,start=~A,length=~A"
-	  (print-name (car section)) (second section) (third section)))
+	  (print-name (span-origin section)) (span-start section) (span-length section)))
 
 (defun save-contents (leaf)
   (save-by-name (leaf-name leaf) (serialize-content-leaf leaf)))
@@ -288,10 +292,12 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (append (first split) new-spans (second split))))
 
 (defun adjust-span-length (span length)
-  (list (first span) (second span) length))
+  (span (span-origin span) (span-start span) length))
 
 (defun adjust-span-start (span start-adjust)
-  (list (first span) (+ (second span) start-adjust) (- (third span) start-adjust)))
+  (span (span-origin span)
+	(+ (span-start span) start-adjust)
+	(- (span-length span) start-adjust)))
 
 (defun extract-range-from-spans (spans start length)
   "Create spans representing the subset of some other spans delimited by start and length."
@@ -303,10 +309,11 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(2nd (cadr spans)))
     (cond ((null 1st) nil)
 	  ((null 2nd) spans)
-	  ((and (equal (car 1st) (car 2nd))
-		(= (second 2nd) (+ (second 1st) (third 1st))))
-	   (cons (list (car 1st) (second 1st) (+ (third 1st) (third 2nd)))
-		 (attempt-fuse (cddr spans))))
+	  ((and (equal (span-origin 1st) (span-origin 2nd))
+		(= (span-start 2nd) (+ (span-start 1st) (span-length 1st))))
+	   (cons
+	    (list (span-origin 1st) (span-start 1st) (+ (span-length 1st) (span-length 2nd)))
+	    (attempt-fuse (cddr spans))))
 	  (T (cons 1st (attempt-fuse (cdr spans)))))))
 
 (defun transclude (source-spans start length target-spans insert-point)
@@ -326,7 +333,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	 (with-collectors (before)
 	   (labels ((recur (n)
 		      (let* ((span (car spans))
-			     (len (third span)))
+			     (len (span-length span)))
 			(cond ((null spans) nil)
 			      ((>= n len) (before span) (pop spans) (recur (- n len)))
 			      ((zerop n) nil)
