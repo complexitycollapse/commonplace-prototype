@@ -342,23 +342,25 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun divide-spans-by-one-point (spans division-point)
   "Divide a list of spans into two lists at the given division point."
-  (let ((before
-	 (with-collectors (before)
-	   (labels ((recur (n)
-		      (let* ((span (car spans))
-			     (len (span-length span)))
-			(cond ((null spans) nil)
-			      ((>= n len) (before span) (pop spans) (recur (- n len)))
-			      ((zerop n) nil)
+  (let* ((spans spans)
+	 (before
+	  (with-collectors (before)
+	    (labels ((recur (n)
+		       (let* ((span (car spans))
+			      (len (if span (span-length span) 0)))
+			 (cond ((null spans) nil)
+			       ((>= n len) (before span) (pop spans) (recur (- n len)))
+			       ((zerop n) nil)
 			      (T (pop spans)
 				 (before (adjust-span-length span n))
 				 (push (adjust-span-start span n) spans))))))
-	     (recur division-point)))))
+	      (recur division-point)))))
     (list before spans)))
 
 (defun divide-spans (spans 1st-division-point &rest other-division-points)
   "Divide a list of spans into n lists at the division points."
-  (if (endp other-division-points) (list spans)
+  (if (or (endp spans) (endp other-division-points))
+      (list spans)
       (let* ((p (car other-division-points))
 	     (division (divide-spans-by-one-point spans (- p 1st-division-point))))
 	(cons (first division)
