@@ -21,6 +21,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 |#
 
 (defparameter local-scroll-name+ '(:scroll "local"))
+(defparameter scratch-name+ '(0))
 (defparameter upstream+ "http://localhost:4242/")
 (defparameter test-repo+ "~/lisp/xanadu/test-repo")
 (defparameter user+ "Me")
@@ -80,14 +81,19 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (cl-fad:merge-pathnames-as-file subdirectory (to-file-name name))))
 
 (defun init ()
-  (ensure-directories-exist (public-path))
-  (ensure-directories-exist (scrolls-path))
-  (with-open-file (s (name-to-path local-scroll-name+)
-		     :direction :output :if-exists :overwrite :if-does-not-exist :create)
-    (write-line "scroll/local" s)
-    (write-line user+ s)
-    (write-line "scroll" s)
-    (write-line "-" s)))
+  (labels ((make-file (name type)
+	     (with-open-file (s (name-to-path name)
+				:direction :output
+				:if-exists :overwrite
+				:if-does-not-exist :create)
+	       (write-line (print-name name) s)
+	       (write-line user+ s)
+	       (write-line type s)
+	       (write-line "-" s))))
+    (ensure-directories-exist (public-path))
+    (ensure-directories-exist (scrolls-path))
+    (make-file local-scroll-name+ "scroll")
+    (make-file scratch-name+ "scratch")))
 
 (defun load-by-name (name)
   (let ((file (make-fillable-string)))
@@ -143,7 +149,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	  (contents (make-fillable-string)))
       (assert (string= content-separator "-"))
       (drain s (lambda (c) (vector-push-extend c contents)))
-      (if (string= type "doc")
+      (if (or (string= type "doc") (string= type "scroll"))
 	  (let ((spans-links (parse-doc-contents contents)))
 	    (make-doc :name name
 		      :owner owner
@@ -222,15 +228,22 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun load-all-contents (doc)
   "Create a hash table of all the contents leaves required by a doc's spans, indexed by name."
-  (make-index #'leaf-name
-	      (mapcar (lambda (a) (parse-vector (load-by-name a)))
-		      (get-doc-span-addresses doc))))
+  (let* ((load-local-scroll nil)
+	 (leaves (mapcar (lambda (a)
+			   (if (equal a local-scroll-name+) (setf load-local-scroll T))
+			   (parse-vector (load-by-name a)))
+			 (get-doc-span-addresses doc))))
+    (if load-local-scroll (push (parse-vector (load-by-name scratch-name+)) leaves))
+    (make-index #'leaf-name leaves)))
 
 (defun apply-span (span contents-hash)
   "Extract the text of a span from a collection of contents leaves."
-  (subseq (content-leaf-contents (gethash (span-origin span) contents-hash))
-	  (span-start span)
-	  (+ (span-start span) (span-length span))))
+  (let ((contents (gethash (span-origin span) contents-hash)))
+    (if (scroll-name-p (span-origin span))
+	(generate-concatatext-clip contents contents-hash (span-start span) (span-length span))
+	(subseq (content-leaf-contents contents)
+		(span-start span)
+		(+ (span-start span) (span-length span))))))
 
 (defun generate-concatatext (doc contents-hash)
   (apply #'concatenate 'string
