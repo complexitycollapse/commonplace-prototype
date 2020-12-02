@@ -268,7 +268,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun serialize-doc-contents (doc)
   (with-output-to-string (s)
     (dolist (span (doc-spans doc))
-      (format s "span:~A~%"(serialize-span-section span)))
+      (princ (serialize-span-line span) s))
     (dolist (link (doc-links doc))
       (format s "link:~A;~{~A~^;~}~%" (car link) (mapcar #'serialize-endset (cdr link))))))
 
@@ -280,6 +280,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (if (car endset) (format s "~A#" (car endset)))
     (if (string= (cadr endset) "DOC") (format s "doc:~A" (print-name (third endset)))
 	(format s "span:~{~A~^+~}" (mapcar #'serialize-span-section (third endset))))))
+
+(defun serialize-span-line (span)
+  (format nil "span:~A~%" (serialize-span-section span)))
 
 (defun serialize-span-section (section)
   (format nil "~A,start=~A,length=~A"
@@ -293,11 +296,21 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun append-to-local-scroll (content)
   "Append some content to the local private scroll and return the span representing it."
-  (let ((pathname (uiop:native-namestring (name-to-path local-scroll-name+))))
-    (let ((start (osicat-posix:stat-size (osicat-posix:stat pathname))))
-      (with-open-file (s pathname :direction :output :if-exists :append)
+  (let ((scratch (uiop:native-namestring (name-to-path scratch-name+)))
+	(scroll (uiop:native-namestring (name-to-path local-scroll-name+)))
+	(length (length content))
+	(scratch-contents (content-leaf-contents (parse-vector (load-by-name scratch-name+)))))
+    (let* ((span-for-scroll (span scratch-name+ (length scratch-contents) length)))
+      (with-open-file (s scratch :direction :output :if-exists :append)
 	(princ content s))
-      (list (list :scroll "local") start (length content)))))
+      (let ((scroll-position (get-next-local-scroll-pos)))
+	(with-open-file (s scroll :direction :output :if-exists :append)
+	  (princ (serialize-span-line span-for-scroll) s))
+	(span local-scroll-name+ scroll-position length)))))
+
+(defun get-next-local-scroll-pos ()
+  (apply #'+ (mapcar #'span-length
+		     (doc-spans (parse-vector (load-by-name local-scroll-name+))))))
 
 (defun insert-spans (spans new-spans n)
   "Insert a list of spans into the middle of some existing spans."

@@ -8,5 +8,6 @@ span:1.3,start=3,length=5
 span:1.4,start=4,length=10
 span:scroll/local,start=1,length=20
 span:scroll/local,start=24,length=12
+span:scroll/local,start=36,length=15
 link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11
 link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4
