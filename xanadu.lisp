@@ -140,6 +140,9 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	 do (vector-push-extend c contents)))
     (new-content-leaf name type contents)))
 
+(defun load-and-parse (name)
+  (parse-vector (load-by-name name)))
+
 (defun parse-vector (v)
   (with-input-from-string (s v)
     (let ((name (parse-name (read-line s)))
@@ -216,40 +219,28 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun parse-doc-ref (doc)
   (parse-name (subseq doc 4)))
 
-(defun get-doc-span-addresses (doc)
-  "Returns all of the addresses contained in all the spans of a document."
-  (mapcar #'span-origin (doc-spans doc)))
-
-(defun make-index (key-fn data)
-  "Create an indexing hash table for some data, with a key derived from the data."
-  (let ((hash (make-hash-table :test 'equal)))
-    (dolist (d data) (setf (gethash (funcall key-fn d) hash) d))
-    hash))
-
-(defun load-all-contents (doc)
-  "Create a hash table of all the contents leaves required by a doc's spans, indexed by name."
-  (let* ((load-local-scroll nil)
-	 (leaves (mapcar (lambda (a)
-			   (if (equal a local-scroll-name+) (setf load-local-scroll T))
-			   (parse-vector (load-by-name a)))
-			 (get-doc-span-addresses doc))))
-    (if load-local-scroll (push (parse-vector (load-by-name scratch-name+)) leaves))
-    (make-index #'leaf-name leaves)))
+(defun load-all-contents (doc &optional (index (make-hash-table :test 'equal)))
+  (dolist (a (mapcar #'span-origin (doc-spans doc)))
+    (when (not (nth-value 1 (gethash a index)))
+      (setf (gethash a index) (load-and-parse a))
+      (if (scroll-name-p a) (load-all-contents (gethash a index) index))))
+  index)
 
 (defun apply-span (span contents-hash)
   "Extract the text of a span from a collection of contents leaves."
   (let ((contents (gethash (span-origin span) contents-hash)))
     (if (scroll-name-p (span-origin span))
-	(generate-concatatext-clip contents contents-hash (span-start span) (span-length span))
+	(generate-concatatext-clip contents (span-start span) (span-length span) contents-hash)
 	(subseq (content-leaf-contents contents)
 		(span-start span)
 		(+ (span-start span) (span-length span))))))
 
-(defun generate-concatatext (doc contents-hash)
+(defun generate-concatatext (doc &optional (contents-hash (load-all-contents doc)))
   (apply #'concatenate 'string
 	 (mapcar (lambda (s) (apply-span s contents-hash)) (doc-spans doc))))
 
-(defun generate-concatatext-clip (doc contents-hash start length)
+(defun generate-concatatext-clip (doc start length
+				  &optional (contents-hash (load-all-contents doc)))
     (apply #'concatenate 'string
 	 (mapcar (lambda (s) (apply-span s contents-hash))
 		 (extract-range-from-spans (doc-spans doc) start length))))
@@ -427,7 +418,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (with-http-client
     (let ((doc (ensure-leaf doc-name T force-download)))
       (when doc
-	(ensure-leaves (get-doc-span-addresses (parse-vector doc)) force-download)))))
+	(ensure-leaves (mapcar #'span-origin (doc-spans (parse-vector doc)))
+		       force-download)))))
 
 (defun get-leaf-from-server (name keep-alive)
   (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
