@@ -303,6 +303,44 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (apply #'+ (mapcar #'span-length
 		     (doc-spans (parse-vector (load-by-name local-scroll-name+))))))
 
+#|
+DONE create the new leaf
+Figure out how docs are stored until they are published
+Convert doc to published one
+Figure out how to name the new leaf
+Rewrite the scroll so that it points to the new leaves
+|#
+
+(defun publish-content (doc name)
+  (let ((content (get-scroll-spans-and-content doc))
+	(new-spans (migrate-scroll-spans-to-permanent-contents doc name)))
+    (save-by-name
+     name
+     (serialize-content-leaf
+      (make-content-leaf :name name :owner user+ :type "content" :contents content)))))
+
+;;; TODO links
+(defun get-scroll-spans-and-content (doc)
+  "Returns the spans in the doc that refer to the local scroll, plus their referenced content"
+  (let* ((scroll (load-and-parse local-scroll-name+))
+	(index (load-all-contents scroll)))
+    (apply
+     #'concatenate
+     'string
+     (collecting
+       (dolist (span (remove-if-not #'scroll-name-p (doc-spans doc) :key #'span-origin))
+	 (collect (generate-concatatext-clip
+		   scroll (span-start span) (span-length span) index)))))))
+
+(defun migrate-scroll-spans-to-permanent-contents (doc new-origin-name)
+  (let ((pos 0))
+    (mapcar
+     (lambda (s) (if (scroll-name-p (span-origin s))
+		     (prog1 (span new-origin-name pos (span-length s))
+		       (incf pos (span-length s)))
+		     s))
+     (doc-spans doc))))
+
 (defun insert-spans (spans new-spans n)
   "Insert a list of spans into the middle of some existing spans."
   (let ((split (divide-spans spans 0 n)))
