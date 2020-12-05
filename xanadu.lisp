@@ -22,6 +22,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter scratch-name+ '(0))
+(defparameter editable-signature+ "EDITABLE")
 (defparameter upstream+ "http://localhost:4242/")
 (defparameter test-repo+ "~/lisp/xanadu/test-repo")
 (defparameter user+ "Me")
@@ -30,7 +31,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
 (defvar repo-path* (sb-posix:getcwd)) ; defaults to current directory
 
-(defstruct leaf name owner type)
+(defstruct leaf name owner type sig)
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) spans links)
 (defstruct span origin start length)
@@ -109,6 +110,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 ;;; Leaf processing
 
 (defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
+(defun editable-p (leaf) (equal editable-signature+ (leaf-sig leaf)))
 
 (defun print-name (parts)
   (if (scroll-name-p parts)
@@ -145,7 +147,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun parse-vector (v)
   (with-input-from-string (s v)
-    (let ((name (parse-name (read-line s)))
+    (let ((sig (read-line s))
+	  (name (parse-name (read-line s)))
 	  (owner (read-line s))
 	  (type (read-line s))
 	  (content-separator (read-line s))
@@ -154,12 +157,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
       (drain s (lambda (c) (vector-push-extend c contents)))
       (if (or (string= type "doc") (string= type "scroll"))
 	  (let ((spans-links (parse-doc-contents contents)))
-	    (make-doc :name name
+	    (make-doc :sig sig
+		      :name name
 		      :owner owner
 		      :type type
 		      :spans (first spans-links)
 		      :links (second spans-links)))
-	  (make-content-leaf :name name
+	  (make-content-leaf :sig sig
+			     :name name
 		             :owner owner
 			     :type type
 			     :contents contents)))))
@@ -248,6 +253,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
     (labels ((p (str) (format s "~A~%" str)))
+      (p (leaf-sig leaf))
       (p (print-name (leaf-name leaf)))
       (p (leaf-owner leaf))
       (p (leaf-type leaf))
