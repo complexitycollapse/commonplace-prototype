@@ -244,9 +244,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (let ((contents (gethash (span-origin span) contents-hash)))
     (if (scroll-name-p (span-origin span))
 	(generate-concatatext-clip contents (span-start span) (span-length span) contents-hash)
-	(subseq (content-leaf-contents contents)
-		(span-start span)
-		(+ (span-start span) (span-length span))))))
+	(subseq (content-leaf-contents contents) (span-start span) (span-end span)))))
 
 (defun generate-concatatext (doc &optional (contents-hash (load-all-contents doc)))
   (apply #'concatenate 'string
@@ -365,7 +363,7 @@ Rewrite the scroll so that it points to the new leaves
 (defun get-leaf-offset-from-map (point map &optional (offset 0))
   "Find the position in the new leaf that corresponds to an old scroll position"
   (let ((span (car map)))
-    (if (and (>= point (span-start span)) (< point (+ (span-start span) (span-length span))))
+    (if (and (>= point (span-start span)) (< point (span-end span)))
 	(+ offset (- point (span-start span)))
 	(get-leaf-offset-from-map point (cdr map) (+ offset (span-length span))))))
 
@@ -419,7 +417,7 @@ Rewrite the scroll so that it points to the new leaves
     (cond ((null 1st) 2nd-list)
 	  ((endp (cdr 1st-list))
 	   (if (and 2nd (equal (span-origin 1st) (span-origin 2nd))
-		    (= (span-start 2nd) (+ (span-start 1st) (span-length 1st))))
+		    (= (span-start 2nd) (span-end 1st)))
 	       (cons (span (span-origin 1st) (span-start 1st) (+ (span-length 1st)
 								 (span-length 2nd)))
 		     (cdr 2nd-list))
