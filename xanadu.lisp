@@ -369,7 +369,19 @@ Rewrite the scroll so that it points to the new leaves
 	(+ offset (- point (span-start span)))
 	(get-leaf-offset-from-map point (cdr map) (+ offset (span-length span))))))
 
+(defun merge-adjacent-spans (1st-span 2nd-span)
+  "Merge two spans if they have the same origin and overlap or are adjacent"
+  (let* ((1st (if (<= (span-start 1st-span) (span-start 2nd-span)) 1st-span 2nd-span))
+	 (2nd (if (eq 1st 2nd-span) 1st-span 2nd-span)))
+    (if (<= (span-start 2nd) (span-end 1st))
+	(list (adjust-span-length 1st (- (max (span-end 1st) (span-end 2nd))
+					 (span-start 1st))))
+	(list 1st 2nd))))
+
 ;; Span operations
+
+(defun span-end (span)
+  (+ (span-start span) (span-length span)))
 
 (defun adjust-span-length (span length)
   (span (span-origin span) (span-start span) length))
