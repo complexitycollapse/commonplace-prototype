@@ -128,8 +128,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun new-content-leaf (name type text)
   (make-content-leaf :name name :owner user+ :type type :contents text))
 
-(defun new-doc-leaf (name type)
-  (make-doc :name name :owner user+ :type type :spans nil :links nil))
+(defun new-doc-leaf (name &optional spans links)
+  (make-doc :name name :owner user+ :type "doc" :spans spans :links links))
 
 (defun span (origin start length) (make-span :origin origin :start start :length length))
 
@@ -141,6 +141,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	 while c
 	 do (vector-push-extend c contents)))
     (new-content-leaf name type contents)))
+
+(defun get-next-version-name (old-name)
+  (nconc (butlast old-name) (list (1+ (car (last old-name))))))
+
+(defun new-version (doc &optional (new-name (get-next-version-name (leaf-name doc))))
+  (let ((version (new-doc-leaf new-name (doc-spans doc) (doc-links doc))))
+    (setf (doc-sig version) editable-signature+)
+    version))
 
 (defun load-and-parse (name)
   (parse-vector (load-by-name name)))
@@ -311,19 +319,24 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 #|
 DONE create the new leaf
-Figure out how docs are stored until they are published
-Convert doc to published one
-Figure out how to name the new leaf
+DONE Figure out how docs are stored until they are published
+DONE Convert doc to published one
 Rewrite the scroll so that it points to the new leaves
 |#
 
-(defun publish-content (doc name)
+;; TODO passing a name is a workaround until it is calculated
+(defun publish (doc contents-name)
   (let ((content (get-scroll-spans-and-content doc))
-	(new-spans (migrate-scroll-spans-to-permanent-contents doc name)))
-    (save-by-name
-     name
-     (serialize-content-leaf
-      (make-content-leaf :name name :owner user+ :type "content" :contents content)))))
+	(new-spans (migrate-scroll-spans-to-permanent-contents doc contents-name)))
+
+    ;; Create the new contents leaf
+    (save-by-name contents-name
+		  (serialize-content-leaf (new-content-leaf contents-name "text" content)))
+
+    ;; Create the finalized document
+    (let ((final-doc (new-doc-leaf (doc-name doc) new-spans)))
+      (setf (leaf-sig final-doc) "SIG")
+      (save-by-name (doc-name doc) (serialize-doc final-doc)))))
 
 ;;; TODO links
 (defun get-scroll-spans-and-content (doc)
@@ -374,10 +387,10 @@ Rewrite the scroll so that it points to the new leaves
 	      (recur division-point)))))
     (list before spans)))
 
-(defun divide-spans-twice (spans 1st-division 2nd-division)
+(defun divide-out-section (spans start length)
   "Divide a list of spans into three lists"
-  (let ((first (divide-spans spans 1st-division)))
-    (cons first (divide-spans spans (- 2nd-division 1st-division)))))
+  (let ((split (divide-spans spans start)))
+    (cons (car split) (divide-spans (cadr split) length))))
 
 (defun merge-spans (1st-list 2nd-list)
   "Join two lists of spans into one, merging spans if necessary"
@@ -397,7 +410,7 @@ Rewrite the scroll so that it points to the new leaves
 
 (defun extract-range-from-spans (spans start length)
   "Create spans representing the subset of some other spans delimited by start and length."
-  (second (divide-spans-twice spans start (+ start length))))
+  (second (divide-out-section spans start length)))
 
 (defun insert-spans (spans new-spans n)
   "Insert a list of spans into the middle of some existing spans."
@@ -406,7 +419,7 @@ Rewrite the scroll so that it points to the new leaves
 
 (defun delete-spans (spans start length)
   "Remove a section from some spans."
-  (let ((divided (divide-spans-twice spans start (+ start length))))
+  (let ((divided (divide-out-section spans start length)))
     (append (first divided) (third divided))))
 
 (defun transclude (source-spans start length target-spans insert-point)
