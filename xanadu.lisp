@@ -299,6 +299,8 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun save-doc (doc)
   (save-by-name (doc-name doc) (serialize-doc doc)))
 
+;;;; Scrolls
+
 (defun append-to-local-scroll (content)
   "Append some content to the local private scroll and return the span representing it."
   (let ((scratch (uiop:native-namestring (name-to-path scratch-name+)))
@@ -359,6 +361,13 @@ Rewrite the scroll so that it points to the new leaves
 		       (incf pos (span-length s)))
 		     s))
      (doc-spans doc))))
+
+(defun get-leaf-offset-from-map (point map &optional (offset 0))
+  "Find the position in the new leaf that corresponds to an old scroll position"
+  (let ((span (car map)))
+    (if (and (>= point (span-start span)) (< point (+ (span-start span) (span-length span))))
+	(+ offset (- point (span-start span)))
+	(get-leaf-offset-from-map point (cdr map) (+ offset (span-length span))))))
 
 ;; Span operations
 
