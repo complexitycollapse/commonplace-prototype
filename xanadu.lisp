@@ -381,9 +381,9 @@ Rewrite the scroll so that it points to the new leaves
 			 (cond ((null spans) nil)
 			       ((>= n len) (before span) (pop spans) (recur (- n len)))
 			       ((zerop n) nil)
-			      (T (pop spans)
-				 (before (adjust-span-length span n))
-				 (push (adjust-span-start span n) spans))))))
+			       (T (pop spans)
+				  (before (adjust-span-length span n))
+				  (push (adjust-span-start span n) spans))))))
 	      (recur division-point)))))
     (list before spans)))
 
