@@ -346,16 +346,29 @@ Rewrite the scroll so that it points to the new leaves
 (defun get-all-scroll-spans (doc)
   "Get all spans from clips and links that refere to the local scroll"
   (flet ((sspan (span) (equal (span-origin span) local-scroll-name+)))
-    (sort
-     (collecting
-       (dolist (s (doc-spans doc)) (if (sspan s) (collect s)))
-       (dolist (l (doc-links doc))
-	 (dolist (e (link-endsets l))
-	   (if (span-endset-p e)
-	       (dolist (s (span-endset-spans e))
-		 (if (sspan s) (collect s)))))))
-     #'<
-     :key #'span-start)))
+    (collecting
+      (dolist (s (doc-spans doc)) (if (sspan s) (collect s)))
+      (dolist (l (doc-links doc))
+	(dolist (e (link-endsets l))
+	  (if (span-endset-p e)
+	      (dolist (s (span-endset-spans e))
+		(if (sspan s) (collect s)))))))))
+
+(defun merge-all-map-duplicates (spans)
+  "Take a list spans from a map and merge all mergeable spans"
+  (labels ((match (span others)
+	     (if (endp others) (values span nil nil)
+		 (multiple-value-bind (spans merged) (merge-adjacent-spans span (car others))
+		   (if merged
+		       (values (car spans) (cdr others) T)
+		       (multiple-value-bind (new-span other-spans changed)
+			   (match span (cdr others))
+			 (values new-span (cons (car others) other-spans) changed)))))))
+    (if (endp spans) nil
+	(multiple-value-bind (new-span new-spans changed)
+	    (match (car spans) (cdr spans))
+	  (if changed (merge-all-map-duplicates (cons new-span new-spans))
+	      (cons (car spans) (merge-all-map-duplicates (cdr spans))))))))
 
 ;;; TODO links
 (defun get-scroll-spans-and-content (doc)
@@ -391,9 +404,10 @@ Rewrite the scroll so that it points to the new leaves
   (let* ((1st (if (<= (span-start 1st-span) (span-start 2nd-span)) 1st-span 2nd-span))
 	 (2nd (if (eq 1st 2nd-span) 1st-span 2nd-span)))
     (if (<= (span-start 2nd) (span-end 1st))
-	(list (adjust-span-length 1st (- (max (span-end 1st) (span-end 2nd))
-					 (span-start 1st))))
-	(list 1st 2nd))))
+	(values (list (adjust-span-length 1st (- (max (span-end 1st) (span-end 2nd))
+						 (span-start 1st))))
+		T)
+	(values (list 1st 2nd) nil))))
 
 ;; Span operations
 
