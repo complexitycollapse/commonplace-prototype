@@ -348,15 +348,20 @@ Rewrite the scroll so that it points to the new leaves
   (merge-all-map-duplicates (get-all-scroll-spans doc)))
 
 (defun get-all-scroll-spans (doc)
-  "Get all spans from clips and links that refere to the local scroll"
-  (flet ((sspan (span) (equal (span-origin span) local-scroll-name+)))
-    (collecting
-      (dolist (s (doc-spans doc)) (if (sspan s) (collect s)))
-      (dolist (l (doc-links doc))
-	(dolist (e (link-endsets l))
-	  (if (span-endset-p e)
-	      (dolist (s (span-endset-spans e))
-		(if (sspan s) (collect s)))))))))
+  (collecting (iterate-spans doc
+			     (lambda (s) (if (equal (span-origin s) local-scroll-name+)
+					     (collect s))))))
+
+(defun iterate-doc (doc on-clip on-link)
+  (mapc on-clip (doc-spans doc))
+  (mapc on-link (doc-links doc)))
+
+(defun iterate-spans (doc on-span)
+  (iterate-doc doc on-span (lambda (l)
+			     (dolist (e (link-endsets l))
+			       (if (span-endset-p e)
+				   (dolist (s (span-endset-spans e))
+				     (funcall on-span s)))))))
 
 (defun merge-all-map-duplicates (spans)
   "Take a list spans from a map and merge all mergeable spans"
