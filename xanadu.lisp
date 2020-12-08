@@ -35,6 +35,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) spans links)
 (defstruct span origin start length)
+(defstruct link type endsets)
+(defstruct endset name)
+(defstruct (span-endset (:include endset)) spans)
+(defstruct (doc-endset (:include endset)) doc-name)
 
 (defmacro not-implemented (name args)
   `(defun ,name ,args (declare ,@ (mapcar (lambda (a) `(ignore ,a)) args))
@@ -210,22 +214,20 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun parse-link-include (link)
   (let ((parts (split-sequence #\; link :start 5)))
-    (cons (car parts) (mapcar #'parse-endset (cdr parts)))))
+    (make-link :type (car parts) :endsets (mapcar #'parse-endset (cdr parts)))))
 
 (defun parse-endset (endset)
   (let* ((name-and-contents (split-sequence #\# endset))
 	 (name (if (cdr name-and-contents) (car name-and-contents)))
 	 (contents (if (cdr name-and-contents) (cadr name-and-contents)
-		       (car name-and-contents)))
-	 (parsed-contents
-	  (cond ((string-starts-with "span:" contents)
-                 (list :span (parse-span-endset contents)))
-		((string-starts-with "doc:" contents)
-                 (list :doc (parse-doc-ref contents)))
-		(T (error "Could not understand endset '~S'" contents)))))
-    (cons name parsed-contents)))
+		       (car name-and-contents))))
+    (cond ((string-starts-with "span:" contents)
+           (make-span-endset :name name :spans (parse-span-endset-spans contents)))
+	  ((string-starts-with "doc:" contents)
+           (make-doc-endset :name name :doc-name (parse-doc-ref contents)))
+	  (T (error "Could not understand endset '~S'" contents)))))
 
-(defun parse-span-endset (span)
+(defun parse-span-endset-spans (span)
   (let ((nested-spans (split-sequence #\+ span :start 5)))
     (mapcar #'parse-span-section nested-spans)))
 
@@ -273,16 +275,19 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (dolist (span (doc-spans doc))
       (princ (serialize-span-line span) s))
     (dolist (link (doc-links doc))
-      (format s "link:~A;~{~A~^;~}~%" (car link) (mapcar #'serialize-endset (cdr link))))))
+      (format s "link:~A;~{~A~^;~}~%"
+	      (link-type link)
+	      (mapcar #'serialize-endset (link-endsets link))))))
 
 (defun serialize-doc (doc)
   (concatenate 'string (serialize-leaf-header doc) (serialize-doc-contents doc)))
 
 (defun serialize-endset (endset)
   (with-output-to-string (s)
-    (if (car endset) (format s "~A#" (car endset)))
-    (if (string= (cadr endset) "DOC") (format s "doc:~A" (print-name (third endset)))
-	(format s "span:~{~A~^+~}" (mapcar #'serialize-span-section (third endset))))))
+    (if (endset-name endset) (format s "~A#" (endset-name endset)))
+    (if (doc-endset-p endset) (format s "doc:~A" (print-name (doc-endset-doc-name endset)))
+	(format s "span:~{~A~^+~}"
+		(mapcar #'serialize-span-section (span-endset-spans endset))))))
 
 (defun serialize-span-line (span)
   (format nil "span:~A~%" (serialize-span-section span)))
