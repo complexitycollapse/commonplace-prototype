@@ -331,8 +331,9 @@ Rewrite the scroll so that it points to the new leaves
 
 ;; TODO passing a name is a workaround until it is calculated
 (defun publish (doc contents-name)
-  (let ((content (get-scroll-spans-and-content doc))
-	(new-spans (migrate-scroll-spans-to-permanent-contents doc contents-name)))
+  (let* ((map (create-leaf-map doc))
+	 (content (get-scroll-content-for-map map))
+	 (new-spans (migrate-scroll-spans-to-permanent-contents doc contents-name)))
 
     ;; Create the new contents leaf
     (save-by-name contents-name
@@ -374,15 +375,15 @@ Rewrite the scroll so that it points to the new leaves
 	      (cons (car spans) (merge-all-map-duplicates (cdr spans))))))))
 
 ;;; TODO links
-(defun get-scroll-spans-and-content (doc)
-  "Returns the spans in the doc that refer to the local scroll, plus their referenced content"
+(defun get-scroll-content-for-map (map)
+  "Returns the content referenced by a map"
   (let* ((scroll (load-and-parse local-scroll-name+))
 	(index (load-all-contents scroll)))
     (apply
      #'concatenate
      'string
      (collecting
-       (dolist (span (remove-if-not #'scroll-name-p (doc-spans doc) :key #'span-origin))
+       (dolist (span (remove-if-not #'scroll-name-p map :key #'span-origin))
 	 (collect (generate-concatatext-clip
 		   scroll (span-start span) (span-length span) index)))))))
 
