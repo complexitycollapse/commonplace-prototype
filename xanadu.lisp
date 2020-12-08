@@ -343,6 +343,9 @@ Rewrite the scroll so that it points to the new leaves
       (setf (leaf-sig final-doc) "SIG")
       (save-by-name (doc-name doc) (serialize-doc final-doc)))))
 
+(defun create-leaf-map (doc)
+  (merge-all-map-duplicates (get-all-scroll-spans doc)))
+
 (defun get-all-scroll-spans (doc)
   "Get all spans from clips and links that refere to the local scroll"
   (flet ((sspan (span) (equal (span-origin span) local-scroll-name+)))
