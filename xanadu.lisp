@@ -130,10 +130,12 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(funcall constructor c)))
 
 (defun new-content-leaf (name type text)
-  (make-content-leaf :name name :owner user+ :type type :contents text))
+  (make-content-leaf :name name :owner user+ :sig "SIG" :type type
+		     :contents text))
 
 (defun new-doc-leaf (name &optional spans links)
-  (make-doc :name name :owner user+ :type "doc" :spans spans :links links))
+  (make-doc :name name :owner user+ :sig editable-signature+ :type "doc"
+	    :spans spans :links links))
 
 (defun span (origin start length) (make-span :origin origin :start start :length length))
 
@@ -150,9 +152,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (nconc (butlast old-name) (list (1+ (car (last old-name))))))
 
 (defun new-version (doc &optional (new-name (get-next-version-name (leaf-name doc))))
-  (let ((version (new-doc-leaf new-name (doc-spans doc) (doc-links doc))))
-    (setf (doc-sig version) editable-signature+)
-    version))
+  (new-doc-leaf new-name (doc-spans doc) (doc-links doc)))
 
 (defun load-and-parse (name)
   (parse-vector (load-by-name name)))
@@ -333,16 +333,15 @@ Rewrite the scroll so that it points to the new leaves
 (defun publish (doc contents-name)
   (let* ((map (create-leaf-map doc))
 	 (content (get-scroll-content-for-map map))
-	 (new-spans (migrate-scroll-spans-to-permanent-contents doc contents-name)))
+	 (final-doc (migrate-scroll-spans-to-permanent-contents doc contents-name)))
 
     ;; Create the new contents leaf
     (save-by-name contents-name
 		  (serialize-content-leaf (new-content-leaf contents-name "text" content)))
 
     ;; Create the finalized document
-    (let ((final-doc (new-doc-leaf (doc-name doc) new-spans)))
-      (setf (leaf-sig final-doc) "SIG")
-      (save-by-name (doc-name doc) (serialize-doc final-doc)))))
+    (setf (leaf-sig final-doc) "SIG")
+    (save-by-name (doc-name doc) (serialize-doc final-doc))))
 
 (defun create-leaf-map (doc)
   (merge-all-map-duplicates (get-all-scroll-spans doc)))
@@ -362,6 +361,26 @@ Rewrite the scroll so that it points to the new leaves
 			       (if (span-endset-p e)
 				   (dolist (s (span-endset-spans e))
 				     (funcall on-span s)))))))
+
+(defun replace-spans (doc new-span-fn)
+  (multiple-value-bind (clips links)
+      (with-collectors (clips links)
+	(iterate-doc
+	 doc
+	 (compose #'clips new-span-fn)
+	 (lambda (l)
+	   (let ((new (copy-link l))
+		 (endsets (mapcar (lambda (e)
+				    (if (span-endset-p e)
+					(let ((newe (copy-span-endset e)))
+					  (setf (span-endset-spans newe)
+						(mapcar new-span-fn (span-endset-spans e)))
+					  newe)
+					e))
+				  (link-endsets l))))
+	     (setf (link-endsets new) endsets)
+	     (links new)))))
+    (new-doc-leaf (doc-name doc) clips links)))
 
 (defun merge-all-map-duplicates (spans)
   "Take a list spans from a map and merge all mergeable spans"
@@ -394,12 +413,12 @@ Rewrite the scroll so that it points to the new leaves
 
 (defun migrate-scroll-spans-to-permanent-contents (doc new-origin-name)
   (let ((pos 0))
-    (mapcar
+    (replace-spans
+     doc
      (lambda (s) (if (scroll-name-p (span-origin s))
 		     (prog1 (span new-origin-name pos (span-length s))
 		       (incf pos (span-length s)))
-		     s))
-     (doc-spans doc))))
+		     s)))))
 
 (defun get-leaf-offset-from-map (point map &optional (offset 0))
   "Find the position in the new leaf that corresponds to an old scroll position"
