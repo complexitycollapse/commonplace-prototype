@@ -333,7 +333,7 @@ Rewrite the scroll so that it points to the new leaves
 (defun publish (doc contents-name)
   (let* ((map (create-leaf-map doc))
 	 (content (get-scroll-content-for-map map))
-	 (final-doc (migrate-scroll-spans-to-permanent-contents doc contents-name)))
+	 (final-doc (migrate-scroll-spans-to-permanent-contents doc contents-name map)))
 
     ;; Create the new contents leaf
     (save-by-name contents-name
@@ -411,14 +411,19 @@ Rewrite the scroll so that it points to the new leaves
 	 (collect (generate-concatatext-clip
 		   scroll (span-start span) (span-length span) index)))))))
 
-(defun migrate-scroll-spans-to-permanent-contents (doc new-origin-name)
-  (let ((pos 0))
-    (replace-spans
-     doc
-     (lambda (s) (if (scroll-name-p (span-origin s))
-		     (prog1 (span new-origin-name pos (span-length s))
-		       (incf pos (span-length s)))
-		     s)))))
+(defun migrate-scroll-spans-to-permanent-contents (doc new-origin-name map)
+  (replace-spans
+   doc
+   (lambda (s) (if (scroll-name-p (span-origin s))
+		   (let ((pos 0))
+		     (block nil
+		       (dolist (m map)
+			 (if (span-contains m (span-start s))
+			     (return (span new-origin-name
+					   (+ pos (- (span-start s) (span-start m)))
+					   (span-length s))))
+			 (incf pos (span-length m)))))
+		   s))))
 
 (defun get-leaf-offset-from-map (point map &optional (offset 0))
   "Find the position in the new leaf that corresponds to an old scroll position"
@@ -441,6 +446,10 @@ Rewrite the scroll so that it points to the new leaves
 
 (defun span-end (span)
   (+ (span-start span) (span-length span)))
+
+(defun span-contains (span point)
+  (let ((offset (- point (span-start span))))
+    (and (>= offset 0) (< offset (span-length span)))))
 
 (defun adjust-span-length (span length)
   (span (span-origin span) (span-start span) length))
