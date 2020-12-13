@@ -248,9 +248,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	(generate-concatatext-clip contents (span-start span) (span-length span) contents-hash)
 	(subseq (content-leaf-contents contents) (span-start span) (span-end span)))))
 
-(defun generate-concatatext (doc &optional (contents-hash (load-all-contents doc)))
+(defun generate-concatatext (doc &optional (contents-hash (if (doc-p doc) (load-all-contents doc))))
   (apply #'concatenate 'string
-	 (mapcar (lambda (s) (apply-span s contents-hash)) (doc-spans doc))))
+	 (mapcar (lambda (s) (apply-span s contents-hash))
+		 (if (listp doc) doc (doc-spans doc)))))
 
 (defun generate-concatatext-clip (doc start length
 				  &optional (contents-hash (load-all-contents doc)))
@@ -326,14 +327,18 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 DONE create the new leaf
 DONE Figure out how docs are stored until they are published
 DONE Convert doc to published one
-Rewrite the scroll so that it points to the new leaves
+DONE Rewrite the scroll so that it points to the new leaves
+What about scroll spans in the document that have already been mograted?
 |#
 
 ;; TODO passing a name is a workaround until it is calculated
 (defun publish (doc contents-name)
   (let* ((map (create-leaf-map doc))
 	 (content (get-scroll-content-for-map map))
-	 (final-doc (migrate-scroll-spans-to-permanent-contents doc contents-name map)))
+	 (final-doc (migrate-doc-spans-to-permanent-contents doc contents-name map))
+	 (scroll (load-and-parse local-scroll-name+))
+	 (final-scroll (migrate-scroll-spans-to-permanent-contents
+			(doc-spans scroll) map contents-name)))
 
     ;; Create the new contents leaf
     (save-by-name contents-name
@@ -341,7 +346,11 @@ Rewrite the scroll so that it points to the new leaves
 
     ;; Create the finalized document
     (setf (leaf-sig final-doc) "SIG")
-    (save-by-name (doc-name doc) (serialize-doc final-doc))))
+    (save-by-name (doc-name doc) (serialize-doc final-doc))
+
+    ; Rewrite the scroll to point at the leaf
+    (setf (doc-spans scroll) final-scroll)
+    (save-by-name local-scroll-name+ (serialize-doc scroll))))
 
 (defun create-leaf-map (doc)
   (merge-all-map-duplicates (get-all-scroll-spans doc)))
@@ -398,7 +407,6 @@ Rewrite the scroll so that it points to the new leaves
 	  (if changed (merge-all-map-duplicates (cons new-span new-spans))
 	      (cons (car spans) (merge-all-map-duplicates (cdr spans))))))))
 
-;;; TODO links
 (defun get-scroll-content-for-map (map)
   "Returns the content referenced by a map"
   (let* ((scroll (load-and-parse local-scroll-name+))
@@ -411,7 +419,7 @@ Rewrite the scroll so that it points to the new leaves
 	 (collect (generate-concatatext-clip
 		   scroll (span-start span) (span-length span) index)))))))
 
-(defun migrate-scroll-spans-to-permanent-contents (doc new-origin-name map)
+(defun migrate-doc-spans-to-permanent-contents (doc new-origin-name map)
   (replace-spans
    doc
    (lambda (s) (if (scroll-name-p (span-origin s))
@@ -442,6 +450,38 @@ Rewrite the scroll so that it points to the new leaves
 		T)
 	(values (list 1st 2nd) nil))))
 
+(defun migrate-scroll-spans-to-permanent-contents (spans map leaf-name)
+  "Repoint a scroll's spans from scratch to a new leaf described by map"
+  (labels ((over-scroll (spans pos)
+	     (cond ((endp spans) nil)
+		   ((null (car spans)) (over-scroll (cdr spans) pos))
+		   ((not (equal (span-origin (car spans)) '(0)))
+		    (cons (car spans) (over-scroll (cdr spans)
+						   (+ pos (span-length (car spans))))))
+		   (T (let ((new (remap-scroll-span (car spans) pos map 0 leaf-name)))
+			(cons (car new) (over-scroll (append (cdr new) (cdr spans))
+						     (+ pos (span-length (car new))))))))))
+    (over-scroll spans 0)))
+
+(defun remap-scroll-span (span pos map mpos leaf-name)
+  "Repoint an individual scoll span from scratch to a new leaf. Returns a list of spans, the
+first of which is rewritten and the second (if any) is the unrewritten remainder."
+  (if (endp map) (return-from remap-scroll-span (list span)))
+  (let* ((m (car map))
+	 (epos (+ pos (span-length span))) ; scroll space position of the end of span
+	 (ms (span-start m))
+	 (mes (span-end m)))
+    (cond
+      ((and (< pos ms) (>= epos ms))
+       (split-span span (- ms pos)))
+      ((and (>= pos ms) (<= epos mes))
+       (list (span leaf-name (+ mpos (- pos ms)) (span-length span))))
+      ((and (>= pos ms) (< pos mes))
+       (let ((split (split-span span (- mes pos))))
+	 (list (span leaf-name (+ mpos (- pos ms)) (span-length (car split)))
+	       (cadr split))))
+      (T (remap-scroll-span span pos (cdr map) (+ mpos (span-length m)) leaf-name)))))
+
 ;; Span operations
 
 (defun span-end (span)
@@ -459,6 +499,10 @@ Rewrite the scroll so that it points to the new leaves
 	(+ (span-start span) start-adjust)
 	(- (span-length span) start-adjust)))
 
+(defun split-span (span length-of-first)
+  (list (adjust-span-length span length-of-first)
+	(adjust-span-start span length-of-first)))
+
 (defun divide-spans (spans division-point)
   "Divide a list of spans into two lists at the given division point."
   (let* ((spans spans)
@@ -471,8 +515,9 @@ Rewrite the scroll so that it points to the new leaves
 			       ((>= n len) (before span) (pop spans) (recur (- n len)))
 			       ((zerop n) nil)
 			       (T (pop spans)
-				  (before (adjust-span-length span n))
-				  (push (adjust-span-start span n) spans))))))
+				  (let ((split (split-span span n)))
+				    (before (car split))
+				    (push (cadr split) spans)))))))
 	      (recur division-point)))))
     (list before spans)))
 
