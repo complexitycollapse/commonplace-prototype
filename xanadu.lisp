@@ -356,9 +356,7 @@ What about scroll spans in the document that have already been mograted?
   (merge-all-map-duplicates (get-all-scroll-spans doc)))
 
 (defun get-all-scroll-spans (doc)
-  (collecting (iterate-spans doc
-			     (lambda (s) (if (equal (span-origin s) local-scroll-name+)
-					     (collect s))))))
+  (collecting (iterate-spans doc (lambda (s) (if (scroll-span-p s) (collect s))))))
 
 (defun iterate-doc (doc on-clip on-link)
   (mapc on-clip (doc-spans doc))
@@ -455,7 +453,7 @@ What about scroll spans in the document that have already been mograted?
   (labels ((over-scroll (spans pos)
 	     (cond ((endp spans) nil)
 		   ((null (car spans)) (over-scroll (cdr spans) pos))
-		   ((not (equal (span-origin (car spans)) '(0)))
+		   ((not (scratch-span-p (car spans)))
 		    (cons (car spans) (over-scroll (cdr spans)
 						   (+ pos (span-length (car spans))))))
 		   (T (let ((new (remap-scroll-span (car spans) pos map 0 leaf-name)))
@@ -490,6 +488,12 @@ first of which is rewritten and the second (if any) is the unrewritten remainder
 (defun span-contains (span point)
   (let ((offset (- point (span-start span))))
     (and (>= offset 0) (< offset (span-length span)))))
+
+(defun scroll-span-p (span)
+  (equal (span-origin span) local-scroll-name+))
+
+(defun scratch-span-p (span)
+  (equal (span-origin span) scratch-name+))
 
 (defun adjust-span-length (span length)
   (span (span-origin span) (span-start span) length))
