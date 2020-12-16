@@ -58,11 +58,10 @@
     (append (cdr lifted) (merge-spans (car lifted) (car list2)) (cdr list2))))
 
 (defun merge-all (list)
-  (cond ((endp list) nil)
-	((endp (cdr list)) list)
-	(T (let ((merged (merge-spans (car list) (cadr list))))
-	     (if (cadr merged) (cons (car list) (merge-all (cdr list)))
-		 (merge-all (cons (car merged) (cddr list))))))))
+  (if (endp (cdr list)) list
+      (let ((merged (merge-spans (car list) (cadr list))))
+	(if (cadr merged) (cons (car list) (merge-all (cdr list)))
+	    (merge-all (cons (car merged) (cddr list)))))))
 
 (defun divide-list (list point &optional collected)
   "Point is included in the second list"
