@@ -133,6 +133,13 @@
   (apply #'concatenate 'string
 	 (mapcar (lambda (s) (apply-span s contents-hash)) spans)))
 
+(defun get-concatatext-position (spans point-origin point &optional (pos 0))
+  (with-slots (origin start length) (car spans)
+    (cond ((endp spans) nil)
+	  ((and (equal origin point-origin) (span-contains (car spans) point pos))
+	   (values (+ pos (- point start)) (car spans)))
+	  (T (get-concatatext-position (cdr spans) point-origin point (+ pos length))))))
+
 (defun iterate-doc (doc on-clip on-link)
   (mapc on-clip (doc-spans doc))
   (mapc on-link (doc-links doc)))
@@ -157,3 +164,13 @@
 
 (defun create-leaf-from-map (map name)
   (new-content-leaf name "text" (generate-concatatext map)))
+
+(defun migrate-scratch-spans-to-leaf (doc map leaf-name)
+  (replace-spans
+   doc
+   (lambda (s)
+     (if (scratch-span-p s)
+	 (span leaf-name
+	       (get-concatatext-position map scratch-name+ (span-start s))
+	       (span-length s))
+	 s))))
