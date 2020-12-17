@@ -5,11 +5,25 @@
 	((endp (cdr list)) (cons (car list) (reverse others)))
 	(T (lift (cdr list) (cons (car list) others)))))
 
+(defmacro recur (args vals &body body)
+  `(labels ((recur ,args ,@body))
+     (recur ,@vals)))
+
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter scratch-name+ '(0))
 (defparameter editable-signature+ "EDITABLE")
 
+
 (defstruct span origin start length)
+(defstruct leaf name owner type sig)
+(defstruct (content-leaf (:include leaf)) contents)
+(defstruct (doc (:include leaf)) spans links)
+(defstruct link type endsets)
+(defstruct endset name)
+(defstruct (span-endset (:include endset)) spans)
+(defstruct (doc-endset (:include endset)) doc-name)
+
+;; Span operations
 
 (defun span (origin start length) (make-span :origin origin :start start :length length))
 
@@ -34,8 +48,12 @@
   (and (equal (span-origin s1) (span-origin s2))
        (or (overlapping-p s1 s2) (abutting-p s1 s2))))
 
-(defun merge-spans (s1 s2)
-  (if (mergeable-p s1 s2)
+(defun duplicating-p (s1 s2)
+  (and (equal (span-origin s1) (span-origin s2))
+       (or (overlapping-p s1 s2))))
+
+(defun merge-spans (s1 s2 &optional only-overlaps)
+  (if (if only-overlaps (duplicating-p s1 s2) (mergeable-p s1 s2))
       (let ((start (min (span-start s1) (span-start s2))))
 	(list (span (span-origin s1) start (1+ (- (max (span-end s1) (span-end s2)) start)))))
       (list s1 s2)))
@@ -60,6 +78,12 @@
 (defun merge-all (list)
   (if (endp (cdr list)) list
       (let ((merged (merge-spans (car list) (cadr list))))
+	(if (cadr merged) (cons (car list) (merge-all (cdr list)))
+	    (merge-all (cons (car merged) (cddr list)))))))
+
+(defun deduplicate (list)
+  (if (endp (cdr list)) list
+      (let ((merged (merge-spans (car list) (cadr list) T)))
 	(if (cadr merged) (cons (car list) (merge-all (cdr list)))
 	    (merge-all (cons (car merged) (cddr list)))))))
 
@@ -91,3 +115,45 @@
 (defun transclude (source-spans start length target-spans insert-point)
   "Transclude content from one set of spans into another."
   (insert-spans target-spans (extract-range source-spans start length) insert-point))
+
+(defun find-span (spans point)
+  (recur (spans pos) (spans 0)
+    (cond ((endp spans) nil)
+	  ((span-contains (car spans) point pos) (values (car spans) pos))
+	  (T (recur (cdr spans) (+ pos (span-length (car spans))))))))
+
+(defun load-all-contents (spans &optional (index (make-hash-table :test 'equal)))
+  (dolist (a (mapcar #'span-origin spans))
+    (when (not (nth-value 1 (gethash a index)))
+      (setf (gethash a index) (load-and-parse a))
+      (if (scroll-name-p a) (load-all-contents (gethash a index) index))))
+  index)
+
+(defun generate-concatatext (spans &optional (contents-hash (load-all-contents spans)))
+  (apply #'concatenate 'string
+	 (mapcar (lambda (s) (apply-span s contents-hash)) spans)))
+
+(defun iterate-doc (doc on-clip on-link)
+  (mapc on-clip (doc-spans doc))
+  (mapc on-link (doc-links doc)))
+
+(defun migrate-scroll-spans-to-scroll-targets (doc scroll-spans)
+  (replace-spans
+   doc
+   (lambda (s) (if (scroll-span-p s)
+		   (extract-range scroll-spans (span-start s) (span-length s))
+		   s))))
+
+(defun get-scratch-spans (doc)
+  (collecting (iterate-spans doc (lambda (s) (if (scratch-span-p s) (collect s))))))
+
+(defun build-map-from-scratch-spans (spans)
+  (let ((deduped (deduplicate (sort spans #'< :key #'span-start))))
+    (collecting
+      (dolist (s spans)
+	(let ((match (find (span-start s) deduped :test (lambda (p s) (span-contains s p)))))
+	  (collect match)
+	  (setf spans (remove match spans)))))))
+
+(defun create-leaf-from-map (map name)
+  (new-content-leaf name "text" (generate-concatatext map)))
