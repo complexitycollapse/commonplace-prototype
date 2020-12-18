@@ -179,11 +179,27 @@
   (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
       (collecting
        (let ((length (- (span-start i) (span-start s))))
-	 (if (> length 0) (collect (edit-span s :length length))))
-       (let ((start (max (span-start s) (span-start i))))
-	 (collect
-	     (funcall fn (edit-span s :start start
-				    :length (1+ (- (min (span-end s) (span-end i)) start))))))
+	 (if (> length 0) (collect (edit-span s :length length)))
+	 (let ((start (max (span-start s) (span-start i))))
+	   (collect
+	       (funcall fn (edit-span s :start start
+				      :length (1+ (- (min (span-end s) (span-end i)) start)))
+			length))))
        (let ((length (- (span-end s) (span-end i))))
 	 (if (> length 0)
 	     (collect (edit-span s :start (1+ (span-end i)) :length length)))))))
+
+(defun rewrite-scratch-span (span map pos leaf-name)
+  (cond ((endp map) (list span))
+	(T (apply #'append
+		  (mapcar (lambda (s)
+			    (rewrite-scratch-span
+			     s (cdr map) (+ pos (span-length (car map))) leaf-name))
+			  (transform-intersection
+			   span
+			   (car map)
+			   (lambda (x p) (span leaf-name (+ pos p) (span-length x)))))))))
+
+(defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
+  (apply #'append (mapcar (lambda (s) (rewrite-scratch-span s map 0 leaf-name))
+			  scroll-spans)))
