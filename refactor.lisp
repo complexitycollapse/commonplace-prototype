@@ -122,6 +122,13 @@
 	  ((span-contains (car spans) point pos) (values (car spans) pos))
 	  (T (recur (cdr spans) (+ pos (span-length (car spans))))))))
 
+;;;; Leaf operations
+
+(defun save-leaf (leaf)
+  (cond ((content-leaf-p leaf) (save-by-name (leaf-name leaf) (serialize-content-leaf leaf)))
+	((doc-p leaf) (save-by-name (leaf-name leaf) (serialize-doc leaf)))
+	(T (error "Should be a leaf: ~A" leaf))))
+
 (defun load-all-contents (spans &optional (index (make-hash-table :test 'equal)))
   (dolist (a (mapcar #'span-origin spans))
     (when (not (nth-value 1 (gethash a index)))
@@ -203,3 +210,17 @@
 (defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
   (apply #'append (mapcar (lambda (s) (rewrite-scratch-span s map 0 leaf-name))
 			  scroll-spans)))
+
+;; TODO passing a name is a workaround until it is calculated
+(defun publish (doc leaf-name)
+  (let* ((scroll (load-by-name local-scroll-name+))
+	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc (doc-spans scroll)))
+	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch)))
+	 (new-leaf (create-leaf-from-map map leaf-name))
+	 (fully-migrated
+	  (migrate-scratch-spans-to-leaf migrated-to-scratch map (leaf-name new-leaf)))
+	 (migrated-scroll-spans
+	  (migrate-scroll-spans-to-leaf (doc-spans scroll) map (leaf-name new-leaf))))
+    (save-leaf new-leaf)
+    (save-leaf fully-migrated)
+    (save-leaf (new-doc-leaf local-scroll-name+ migrated-scroll-spans nil))))
