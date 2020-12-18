@@ -33,6 +33,8 @@
 
 (defun span-end (s) (+ (span-start s) (span-length s) -1))
 
+(defun same-origin (s1 s2) (equal (span-origin s1) (span-origin s2)))
+
 (defun span-contains (span point &optional (adjustment 0))
   (let ((offset (- point (span-start span) adjustment)))
     (and (>= offset 0) (< offset (span-length span)))))
@@ -45,12 +47,10 @@
   (eq 1 (- (span-start s2) (span-end s1))))
 
 (defun mergeable-p (s1 s2)
-  (and (equal (span-origin s1) (span-origin s2))
-       (or (overlapping-p s1 s2) (abutting-p s1 s2))))
+  (and (same-origin s1 s2) (or (overlapping-p s1 s2) (abutting-p s1 s2))))
 
 (defun duplicating-p (s1 s2)
-  (and (equal (span-origin s1) (span-origin s2))
-       (or (overlapping-p s1 s2))))
+  (and (same-origin s1 s2) (or (overlapping-p s1 s2))))
 
 (defun merge-spans (s1 s2 &optional only-overlaps)
   (if (if only-overlaps (duplicating-p s1 s2) (mergeable-p s1 s2))
@@ -174,3 +174,16 @@
 	       (get-concatatext-position map scratch-name+ (span-start s))
 	       (span-length s))
 	 s))))
+
+(defun transform-intersection (s i fn)
+  (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
+      (collecting
+       (let ((length (- (span-start i) (span-start s))))
+	 (if (> length 0) (collect (edit-span s :length length))))
+       (let ((start (max (span-start s) (span-start i))))
+	 (collect
+	     (funcall fn (edit-span s :start start
+				    :length (1+ (- (min (span-end s) (span-end i)) start))))))
+       (let ((length (- (span-end s) (span-end i))))
+	 (if (> length 0)
+	     (collect (edit-span s :start (1+ (span-end i)) :length length)))))))
