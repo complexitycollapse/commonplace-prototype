@@ -9,6 +9,11 @@
   `(labels ((recur ,args ,@body))
      (recur ,@vals)))
 
+(defun flatten (list)
+  (cond ((endp list) nil)
+	((listp (car list)) (append (car list) (flatten (cdr list))))
+	(T (cons (car list) (flatten (cdr list))))))
+
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter scratch-name+ '(0))
 (defparameter editable-signature+ "EDITABLE")
@@ -133,12 +138,26 @@
   (dolist (a (mapcar #'span-origin spans))
     (when (not (nth-value 1 (gethash a index)))
       (setf (gethash a index) (load-and-parse a))
-      (if (scroll-name-p a) (load-all-contents (gethash a index) index))))
+      (if (scroll-name-p a) (load-all-contents (doc-spans (gethash a index)) index))))
   index)
 
 (defun generate-concatatext (spans &optional (contents-hash (load-all-contents spans)))
   (apply #'concatenate 'string
 	 (mapcar (lambda (s) (apply-span s contents-hash)) spans)))
+
+(defun generate-concatatext-clip (spans start length
+				  &optional (contents-hash (load-all-contents spans)))
+    (apply #'concatenate 'string
+	 (mapcar (lambda (s) (apply-span s contents-hash))
+		 (extract-range-from-spans spans start length))))
+
+(defun apply-span (span contents-hash)
+  "Extract the text of a span from a collection of contents leaves."
+  (let ((contents (gethash (span-origin span) contents-hash)))
+    (if (scroll-name-p (span-origin span))
+	(generate-concatatext-clip (doc-spans contents) (span-start span) (span-length span)
+				   contents-hash)
+	(subseq (content-leaf-contents contents) (span-start span) (span-end span)))))
 
 (defun get-concatatext-position (spans point-origin point &optional (pos 0))
   (with-slots (origin start length) (car spans)
@@ -150,6 +169,28 @@
 (defun iterate-doc (doc on-clip on-link)
   (mapc on-clip (doc-spans doc))
   (mapc on-link (doc-links doc)))
+
+(defun replace-spans (doc new-span-fn)
+  (multiple-value-bind (clips links)
+      (with-collectors (clips links)
+	(iterate-doc
+	 doc
+	 (compose #'clips new-span-fn)
+	 (lambda (l)
+	   (let ((new (copy-link l))
+		 (endsets (mapcar (lambda (e)
+				    (if (span-endset-p e)
+					(let ((newe (copy-span-endset e)))
+					  (setf (span-endset-spans newe)
+						(flatten
+						 (mapcar new-span-fn (span-endset-spans e))))
+					  newe)
+					e))
+				  (link-endsets l))))
+	     (setf (link-endsets new) endsets)
+	     (links new)))))
+    (new-doc-leaf (doc-name doc) (flatten clips) links)))
+
 
 (defun migrate-scroll-spans-to-scroll-targets (doc scroll-spans)
   (replace-spans
@@ -213,7 +254,7 @@
 
 ;; TODO passing a name is a workaround until it is calculated
 (defun publish (doc leaf-name)
-  (let* ((scroll (load-by-name local-scroll-name+))
+  (let* ((scroll (load-and-parse local-scroll-name+))
 	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc (doc-spans scroll)))
 	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch)))
 	 (new-leaf (create-leaf-from-map map leaf-name))
