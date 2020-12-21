@@ -2,24 +2,6 @@
 
 (in-package #:xanadu)
 
-#|
-name
-creator
-type
--
-span:address1,start=1,length=200
-span:address2,start=3,length=100
-span:scroll/local,start=10235,length=40
-
-link:italics;span:address1,start=20,length=10
-link:title;title#span:address2,start=80,length=90;doc#doc:address
-link:bold;span:address1,start=14,length=5+address2,start=10,length=5
-|#
-
-#|
-(setf foo (parse-vector (format nil "2.1~%me~%doc~%-~%span:1.1,start=0,length=10~%span:1.2,start=2,length=3~%span:1.3,start=3,length=5~%span:1.4,start=4,length=10~%span:scroll/local,start=4,length=4~%link:italics;blah#span:1.2.3.4,start=1,length=100+1.88,start=200,length=11~%link:title;span:1.99,start=0,length=10;document#doc:1.2.3.4~%")))
-|#
-
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter scratch-name+ '(0))
 (defparameter editable-signature+ "EDITABLE")
@@ -31,14 +13,16 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
 (defvar repo-path* (sb-posix:getcwd)) ; defaults to current directory
 
+(defstruct span origin start length)
 (defstruct leaf name owner type sig)
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) spans links)
-(defstruct span origin start length)
 (defstruct link type endsets)
 (defstruct endset name)
 (defstruct (span-endset (:include endset)) spans)
 (defstruct (doc-endset (:include endset)) doc-name)
+
+;;;; Common functions
 
 (defmacro not-implemented (name args)
   `(defun ,name ,args (declare ,@ (mapcar (lambda (a) `(ignore ,a)) args))
@@ -48,17 +32,338 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (with-unique-names (val)
     `(let ((,val ,form)) (format T ,(format nil "~A: ~~A~%" form) ,val) ,val)))
 
+(defmacro awhen (test &body body)
+  `(let ((,(intern "IT") ,test))
+     (when ,(intern "IT") ,@body)))
+
+(defun lift (list &optional others)
+  (cond ((endp list) nil)
+	((endp (cdr list)) (cons (car list) (reverse others)))
+	(T (lift (cdr list) (cons (car list) others)))))
+
+(defmacro recur (args vals &body body)
+  `(labels ((recur ,args ,@body))
+     (recur ,@vals)))
+
+(defun flatten (list)
+  (cond ((endp list) nil)
+	((listp (car list)) (append (car list) (flatten (cdr list))))
+	(T (cons (car list) (flatten (cdr list))))))
+
 (defun string-starts-with (prefix string)
   (and (>= (length string) (length prefix))
        (string= prefix string :end2 (length prefix))))
 
-(defun merge-url (&rest parts)
-  (if (endp parts) (return-from merge-url ""))
-  (let ((part (car parts)))
-    (if (string-starts-with "/" part) (setf part (subseq part 1)))
-    (let ((last (1- (length part))))
-      (if (string= #\/ (elt part last)) (setf part (subseq part 0 last))))
-    (concatenate 'string part (if (cdr parts) "/" "") (apply #'merge-url (cdr parts)))))
+;;; Span operations
+
+(defun span (origin start length) (make-span :origin origin :start start :length length))
+
+(defun edit-span (span &key (origin (span-origin span)) (start (span-start span))
+			 (length (span-length span)))
+  (span origin start length))
+
+(defun span-end (s) (+ (span-start s) (span-length s) -1))
+
+(defun same-origin (s1 s2) (equal (span-origin s1) (span-origin s2)))
+
+(defun span-contains (span point &optional (adjustment 0))
+  (let ((offset (- point (span-start span) adjustment)))
+    (and (>= offset 0) (< offset (span-length span)))))
+
+(defun overlapping-p (s1 s2 &key (adjust1 0) (adjust2 0))
+  (not (or (< (+ (span-end s1) adjust1) (+ (span-start s2) adjust2))
+	   (< (+ (span-end s2) adjust2) (+ (span-start s1) adjust1)))))
+
+(defun abutting-p (s1 s2)
+  (eq 1 (- (span-start s2) (span-end s1))))
+
+(defun mergeable-p (s1 s2)
+  (and (same-origin s1 s2) (or (overlapping-p s1 s2) (abutting-p s1 s2))))
+
+(defun duplicating-p (s1 s2)
+  (and (same-origin s1 s2) (overlapping-p s1 s2)))
+
+(defun merge-spans (s1 s2 &optional only-overlaps)
+  (if (if only-overlaps (duplicating-p s1 s2) (mergeable-p s1 s2))
+      (let ((start (min (span-start s1) (span-start s2))))
+	(list (span (span-origin s1) start (1+ (- (max (span-end s1) (span-end s2)) start)))))
+      (list s1 s2)))
+
+(defun divide-span-at-point (s1 point)
+  (with-slots (start length) s1
+    (if (and (span-contains s1 point) (> point (span-start s1)))
+	(list (edit-span s1 :length (- point start))
+	      (edit-span s1 :start (+ start point -1) :length (1+ (- length point))))
+	(list s1))))
+
+(defun divide-span (s length)
+  (if (or (zerop length) (>= length (span-length s)))
+      (list s)
+      (list (edit-span s :length length)
+	    (edit-span s :start (+ (span-start s) length) :length (- (span-length s) length)))))
+
+(defun merge-span-lists (list1 list2)
+  (let ((lifted (lift list1)))
+    (append (cdr lifted) (merge-spans (car lifted) (car list2)) (cdr list2))))
+
+(defun merge-all (list)
+  "Merge all spans that abut or overlap"
+  (if (endp (cdr list)) list
+      (let ((merged (merge-spans (car list) (cadr list))))
+	(if (cadr merged) (cons (car list) (merge-all (cdr list)))
+	    (merge-all (cons (car merged) (cddr list)))))))
+
+(defun deduplicate (list)
+  "Merge all spans that overlap (i.e. duplicate a portion of each other's content"
+  (if (endp (cdr list)) list
+      (let ((merged (merge-spans (car list) (cadr list) T)))
+	(if (cadr merged) (cons (car list) (deduplicate (cdr list)))
+	    (deduplicate (cons (car merged) (cddr list)))))))
+
+(defun divide-list (list point &optional collected)
+  "Divide a list of spans into two list at the given point (included in the second list)"
+  (let ((s (car list)))
+    (cond ((endp list) (list (nreverse collected) nil))
+	  ((zerop point) (list (nreverse collected) list))
+	  ((> (span-length s) point)
+	   (let ((split (divide-span s point)))
+	     (list (nreverse (cons (car split) collected)) (cons (cadr split) (cdr list)))))
+	  (T (divide-list (cdr list) (- point (span-length s)) (cons s collected))))))
+
+(defun divide-twice (list start length)
+  "Divide a list of span into three, with the central section having given start and length"
+  (let ((div (divide-list list start)))
+    (cons (car div) (divide-list (cadr div) length))))
+
+(defun extract-range (spans start length)
+  "Create spans representing the subset of some other spans delimited by start and length."
+  (second (divide-twice spans start length)))
+
+(defun insert-spans (spans new-spans point)
+  "Insert a list of spans into the middle of some existing spans."
+  (let ((div (divide-list spans point)))
+    (merge-span-lists (car div) (merge-span-lists new-spans (cadr div)))))
+
+(defun delete-spans (spans start length)
+  "Remove a section from some spans."
+  (let ((div (divide-twice spans start length)))
+    (merge-span-lists (first div) (third div))))
+
+(defun transclude (source-spans start length target-spans insert-point)
+  "Transclude content from one set of spans into another."
+  (insert-spans target-spans (extract-range source-spans start length) insert-point))
+
+(defun find-span (spans point)
+  (recur (spans pos) (spans 0)
+    (cond ((endp spans) nil)
+	  ((span-contains (car spans) point pos) (values (car spans) pos))
+	  (T (recur (cdr spans) (+ pos (span-length (car spans))))))))
+
+(defun get-concatatext-position (spans point-origin point &optional (pos 0))
+  (with-slots (origin start length) (car spans)
+    (cond ((endp spans) nil)
+	  ((and (equal origin point-origin) (span-contains (car spans) point))
+	   (values (+ pos (- point start)) (car spans)))
+	  (T (get-concatatext-position (cdr spans) point-origin point (+ pos length))))))
+
+(defun transform-intersection (s i fn)
+  "Breaks s into a list of spans according to which parts overlap with i, calling fn on the
+parts that do"
+  (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
+      (collecting
+       (let ((length (- (span-start i) (span-start s))))
+	 (if (> length 0) (collect (edit-span s :length length)))
+	 (let ((start (max (span-start s) (span-start i))))
+	   (collect
+	       (funcall fn (edit-span s :start start
+				      :length (1+ (- (min (span-end s) (span-end i)) start)))
+			length))))
+       (let ((length (- (span-end s) (span-end i))))
+	 (if (> length 0)
+	     (collect (edit-span s :start (1+ (span-end i)) :length length)))))))
+
+;;;; Leaf names
+
+(defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
+
+(defun get-next-version-name (old-name)
+  (nconc (butlast old-name) (list (1+ (car (last old-name))))))
+
+;;;; Leaf operations
+
+(defun iterate-doc (doc on-clip on-link)
+  (mapc on-clip (doc-spans doc))
+  (mapc on-link (doc-links doc)))
+
+(defun iterate-spans (doc on-span)
+  (iterate-doc doc on-span (lambda (l)
+			     (dolist (e (link-endsets l))
+			       (if (span-endset-p e)
+				   (dolist (s (span-endset-spans e))
+				     (funcall on-span s)))))))
+
+(defun replace-spans (doc new-span-fn)
+  (multiple-value-bind (clips links)
+      (with-collectors (clips links)
+	(iterate-doc
+	 doc
+	 (compose #'clips new-span-fn)
+	 (lambda (l)
+	   (let ((new (copy-link l))
+		 (endsets (mapcar (lambda (e)
+				    (if (span-endset-p e)
+					(let ((newe (copy-span-endset e)))
+					  (setf (span-endset-spans newe)
+						(flatten
+						 (mapcar new-span-fn (span-endset-spans e))))
+					  newe)
+					e))
+				  (link-endsets l))))
+	     (setf (link-endsets new) endsets)
+	     (links new)))))
+    (new-doc-leaf (doc-name doc) (flatten clips) links)))
+
+(defun editable-p (leaf) (equal editable-signature+ (leaf-sig leaf)))
+
+(defun new-content-leaf (name type text)
+  (make-content-leaf :name name :owner user+ :sig "SIG" :type type
+		     :contents text))
+
+(defun new-doc-leaf (name &optional spans links)
+  (make-doc :name name :owner user+ :sig editable-signature+ :type "doc"
+	    :spans spans :links links))
+
+(defun new-version (doc &optional (new-name (get-next-version-name (leaf-name doc))))
+  (new-doc-leaf new-name (doc-spans doc) (doc-links doc)))
+
+(defun create-content-from-file (name type path)
+  "Import text from a file"
+  (let ((contents (make-fillable-string)))
+    (with-open-file (s path)
+      (loop for c = (read-char s nil)
+	 while c
+	 do (vector-push-extend c contents)))
+    (new-content-leaf name type contents)))
+
+(defun load-all-contents (spans &optional (index (make-hash-table :test 'equal)))
+  (dolist (a (mapcar #'span-origin spans))
+    (when (not (nth-value 1 (gethash a index)))
+      (setf (gethash a index) (load-and-parse a))
+      (if (scroll-name-p a) (load-all-contents (doc-spans (gethash a index)) index))))
+  index)
+
+(defun generate-concatatext (spans &optional (contents-hash (load-all-contents spans)))
+  (apply #'concatenate 'string
+	 (mapcar (lambda (s) (apply-span s contents-hash)) spans)))
+
+(defun generate-concatatext-clip (spans start length
+				  &optional (contents-hash (load-all-contents spans)))
+    (apply #'concatenate 'string
+	 (mapcar (lambda (s) (apply-span s contents-hash))
+		 (extract-range spans start length))))
+
+(defun apply-span (span contents-hash)
+  "Extract the text of a span from a collection of contents leaves."
+  (let ((contents (gethash (span-origin span) contents-hash)))
+    (if (scroll-name-p (span-origin span))
+	(generate-concatatext-clip (doc-spans contents) (span-start span) (span-length span)
+				   contents-hash)
+	(subseq (content-leaf-contents contents) (span-start span) (1+ (span-end span))))))
+
+;;;; Scrolls and publishing
+
+(defun scroll-span-p (span)
+  (equal (span-origin span) local-scroll-name+))
+
+(defun scratch-span-p (span)
+  (equal (span-origin span) scratch-name+))
+
+(defun append-to-local-scroll (content)
+  "Append some content to the local private scroll and return the span representing it."
+  (let ((scratch (uiop:native-namestring (name-to-path scratch-name+)))
+	(scroll (uiop:native-namestring (name-to-path local-scroll-name+)))
+	(length (length content))
+	(scratch-contents (content-leaf-contents (parse-vector (load-by-name scratch-name+)))))
+    (let* ((span-for-scroll (span scratch-name+ (length scratch-contents) length)))
+      (with-open-file (s scratch :direction :output :if-exists :append)
+	(princ content s))
+      (let ((scroll-position (get-next-local-scroll-pos)))
+	(with-open-file (s scroll :direction :output :if-exists :append)
+	  (princ (serialize-span-line span-for-scroll) s))
+	(span local-scroll-name+ scroll-position length)))))
+
+(defun get-next-local-scroll-pos ()
+  (apply #'+ (mapcar #'span-length
+		     (doc-spans (parse-vector (load-by-name local-scroll-name+))))))
+
+(defun migrate-scroll-spans-to-scroll-targets (doc scroll-spans)
+  (replace-spans
+   doc
+   (lambda (s) (if (scroll-span-p s)
+		   (extract-range scroll-spans (span-start s) (span-length s))
+		   s))))
+
+(defun get-scratch-spans (doc)
+  (collecting (iterate-spans doc (lambda (s) (if (scratch-span-p s) (collect s))))))
+
+(defun build-map-from-scratch-spans (spans)
+  (let ((deduped (deduplicate (sort spans #'< :key #'span-start))))
+    (collecting
+      (dolist (s spans)
+	(awhen (find (span-start s) deduped :test (lambda (p s) (span-contains s p)))
+	  (collect it)
+	  (setf deduped (remove it deduped)))))))
+
+(defun create-leaf-from-map (map name)
+  (new-content-leaf name "text" (generate-concatatext map)))
+
+(defun migrate-scratch-spans-to-leaf (doc map leaf-name)
+  (replace-spans
+   doc
+   (lambda (s)
+     (if (scratch-span-p s)
+	 (span leaf-name
+	       (get-concatatext-position map scratch-name+ (span-start s))
+	       (span-length s))
+	 s))))
+
+(defun rewrite-scratch-span (span map pos leaf-name)
+  (cond ((endp map) (list span))
+	(T (mapcan (lambda (s)
+		     (rewrite-scratch-span
+		      s (cdr map) (+ pos (span-length (car map))) leaf-name))
+		   (transform-intersection
+		    span
+		    (car map)
+		    (lambda (x p) (span leaf-name (+ pos p) (span-length x))))))))
+
+(defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
+  (mapcan (lambda (s) (rewrite-scratch-span s map 0 leaf-name)) scroll-spans))
+
+;; TODO passing a name is a workaround until it is calculated
+(defun publish (doc leaf-name)
+  (let* ((scroll (load-and-parse local-scroll-name+))
+	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc (doc-spans scroll)))
+	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch)))
+	 (new-leaf (create-leaf-from-map map leaf-name))
+	 (fully-migrated
+	  (migrate-scratch-spans-to-leaf migrated-to-scratch map (leaf-name new-leaf)))
+	 (migrated-scroll-spans
+	  (migrate-scroll-spans-to-leaf (doc-spans scroll) map (leaf-name new-leaf))))
+    (save-leaf new-leaf)
+    (save-leaf fully-migrated)
+    (save-leaf (new-doc-leaf local-scroll-name+ migrated-scroll-spans nil))))
+
+;;;; Ugly file processing stuff
+;;;; (get rid of this and do it properly!)
+
+(defun make-fillable-string ()
+  (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
+
+(defun drain (stream constructor)
+  (do ((c (read-char stream nil :eof) (read-char stream nil :eof)))
+	  ((eq c :eof))
+	(funcall constructor c)))
 
 ;;; Repo management
 
@@ -69,11 +374,6 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (if (scroll-name-p parts)
       (cadr parts)
       (format nil "~{~A~^_~}" parts)))
-
-(defun parse-name (name-string)
-  (if (string-starts-with "scroll/" name-string)
-      (list :scroll (subseq name-string 7))
-      (mapcar #'parse-integer (split-sequence #\. name-string))))
 
 (defun scrolls-path ()
   (cl-fad:merge-pathnames-as-directory (cl-fad:pathname-as-directory repo-path*) "scrolls/"))
@@ -91,7 +391,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 				:direction :output
 				:if-exists :overwrite
 				:if-does-not-exist :create)
-	       (write-line (print-name name) s)
+	       (write-line (serialize-name name) s)
 	       (write-line user+ s)
 	       (write-line type s)
 	       (write-line "-" s))))
@@ -99,6 +399,14 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
     (ensure-directories-exist (scrolls-path))
     (make-file local-scroll-name+ "scroll")
     (make-file scratch-name+ "scratch")))
+
+(defun load-and-parse (name)
+  (parse-vector (load-by-name name)))
+
+(defun save-leaf (leaf)
+  (cond ((content-leaf-p leaf) (save-by-name (leaf-name leaf) (serialize-content-leaf leaf)))
+	((doc-p leaf) (save-by-name (leaf-name leaf) (serialize-doc leaf)))
+	(T (error "Should be a leaf: ~A" leaf))))
 
 (defun load-by-name (name)
   (let ((file (make-fillable-string)))
@@ -111,51 +419,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
   (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
     (princ contents s)))
 
-;;; Leaf processing
+(defun leaf-missing (name)
+  (not (probe-file (name-to-path name))))
 
-(defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
-(defun editable-p (leaf) (equal editable-signature+ (leaf-sig leaf)))
-
-(defun print-name (parts)
-  (if (scroll-name-p parts)
-      (format nil "scroll/~A" (cadr parts))
-      (format nil "~{~A~^.~}" parts)))
-
-(defun make-fillable-string ()
-  (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
-
-(defun drain (stream constructor)
-  (do ((c (read-char stream nil :eof) (read-char stream nil :eof)))
-	  ((eq c :eof))
-	(funcall constructor c)))
-
-(defun new-content-leaf (name type text)
-  (make-content-leaf :name name :owner user+ :sig "SIG" :type type
-		     :contents text))
-
-(defun new-doc-leaf (name &optional spans links)
-  (make-doc :name name :owner user+ :sig editable-signature+ :type "doc"
-	    :spans spans :links links))
-
-(defun span (origin start length) (make-span :origin origin :start start :length length))
-
-(defun create-content-from-file (name type path)
-  "Import text from a file"
-  (let ((contents (make-fillable-string)))
-    (with-open-file (s path)
-      (loop for c = (read-char s nil)
-	 while c
-	 do (vector-push-extend c contents)))
-    (new-content-leaf name type contents)))
-
-(defun get-next-version-name (old-name)
-  (nconc (butlast old-name) (list (1+ (car (last old-name))))))
-
-(defun new-version (doc &optional (new-name (get-next-version-name (leaf-name doc))))
-  (new-doc-leaf new-name (doc-spans doc) (doc-links doc)))
-
-(defun load-and-parse (name)
-  (parse-vector (load-by-name name)))
+;;;; Parsing leaves
 
 (defun parse-vector (v)
   (with-input-from-string (s v)
@@ -180,6 +447,11 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 		             :owner owner
 			     :type type
 			     :contents contents)))))
+
+(defun parse-name (name-string)
+  (if (string-starts-with "scroll/" name-string)
+      (list :scroll (subseq name-string 7))
+      (mapcar #'parse-integer (split-sequence #\. name-string))))
 
 (defun parse-doc-contents (contents)
   "Parses the contents part of a leaf as if it were a document, returning (list spans links)."
@@ -234,42 +506,27 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 (defun parse-doc-ref (doc)
   (parse-name (subseq doc 4)))
 
-(defun load-all-contents (doc &optional (index (make-hash-table :test 'equal)))
-  (dolist (a (mapcar #'span-origin (doc-spans doc)))
-    (when (not (nth-value 1 (gethash a index)))
-      (setf (gethash a index) (load-and-parse a))
-      (if (scroll-name-p a) (load-all-contents (gethash a index) index))))
-  index)
+;;;; Serializing leaves
 
-(defun apply-span (span contents-hash)
-  "Extract the text of a span from a collection of contents leaves."
-  (let ((contents (gethash (span-origin span) contents-hash)))
-    (if (scroll-name-p (span-origin span))
-	(generate-concatatext-clip contents (span-start span) (span-length span) contents-hash)
-	(subseq (content-leaf-contents contents) (span-start span) (span-end span)))))
+(defun serialize-doc (doc)
+  (concatenate 'string (serialize-leaf-header doc) (serialize-doc-contents doc)))
 
-(defun generate-concatatext (doc &optional (contents-hash (if (doc-p doc) (load-all-contents doc))))
-  (apply #'concatenate 'string
-	 (mapcar (lambda (s) (apply-span s contents-hash))
-		 (if (listp doc) doc (doc-spans doc)))))
+(defun serialize-content-leaf (leaf)
+  (concatenate 'string (serialize-leaf-header leaf) (content-leaf-contents leaf)))
 
-(defun generate-concatatext-clip (doc start length
-				  &optional (contents-hash (load-all-contents doc)))
-    (apply #'concatenate 'string
-	 (mapcar (lambda (s) (apply-span s contents-hash))
-		 (extract-range-from-spans (doc-spans doc) start length))))
+(defun serialize-name (parts)
+  (if (scroll-name-p parts)
+      (format nil "scroll/~A" (cadr parts))
+      (format nil "~{~A~^.~}" parts)))
 
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
     (labels ((p (str) (format s "~A~%" str)))
       (p (leaf-sig leaf))
-      (p (print-name (leaf-name leaf)))
+      (p (serialize-name (leaf-name leaf)))
       (p (leaf-owner leaf))
       (p (leaf-type leaf))
       (p "-"))))
-
-(defun serialize-content-leaf (leaf)
-  (concatenate 'string (serialize-leaf-header leaf) (content-leaf-contents leaf)))
 
 (defun serialize-doc-contents (doc)
   (with-output-to-string (s)
@@ -280,13 +537,10 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 	      (link-type link)
 	      (mapcar #'serialize-endset (link-endsets link))))))
 
-(defun serialize-doc (doc)
-  (concatenate 'string (serialize-leaf-header doc) (serialize-doc-contents doc)))
-
 (defun serialize-endset (endset)
   (with-output-to-string (s)
     (if (endset-name endset) (format s "~A#" (endset-name endset)))
-    (if (doc-endset-p endset) (format s "doc:~A" (print-name (doc-endset-doc-name endset)))
+    (if (doc-endset-p endset) (format s "doc:~A" (serialize-name (doc-endset-doc-name endset)))
 	(format s "span:~{~A~^+~}"
 		(mapcar #'serialize-span-section (span-endset-spans endset))))))
 
@@ -295,276 +549,7 @@ link:bold;span:address1,start=14,length=5+address2,start=10,length=5
 
 (defun serialize-span-section (section)
   (format nil "~A,start=~A,length=~A"
-	  (print-name (span-origin section)) (span-start section) (span-length section)))
-
-(defun save-contents (leaf)
-  (save-by-name (leaf-name leaf) (serialize-content-leaf leaf)))
-
-(defun save-doc (doc)
-  (save-by-name (doc-name doc) (serialize-doc doc)))
-
-;;;; Scrolls
-
-(defun append-to-local-scroll (content)
-  "Append some content to the local private scroll and return the span representing it."
-  (let ((scratch (uiop:native-namestring (name-to-path scratch-name+)))
-	(scroll (uiop:native-namestring (name-to-path local-scroll-name+)))
-	(length (length content))
-	(scratch-contents (content-leaf-contents (parse-vector (load-by-name scratch-name+)))))
-    (let* ((span-for-scroll (span scratch-name+ (length scratch-contents) length)))
-      (with-open-file (s scratch :direction :output :if-exists :append)
-	(princ content s))
-      (let ((scroll-position (get-next-local-scroll-pos)))
-	(with-open-file (s scroll :direction :output :if-exists :append)
-	  (princ (serialize-span-line span-for-scroll) s))
-	(span local-scroll-name+ scroll-position length)))))
-
-(defun get-next-local-scroll-pos ()
-  (apply #'+ (mapcar #'span-length
-		     (doc-spans (parse-vector (load-by-name local-scroll-name+))))))
-
-#|
-DONE create the new leaf
-DONE Figure out how docs are stored until they are published
-DONE Convert doc to published one
-DONE Rewrite the scroll so that it points to the new leaves
-What about scroll spans in the document that have already been mograted?
-|#
-
-;; TODO passing a name is a workaround until it is calculated
-(defun publish (doc contents-name)
-  (let* ((map (create-leaf-map doc))
-	 (content (get-scroll-content-for-map map))
-	 (final-doc (migrate-doc-spans-to-permanent-contents doc contents-name map))
-	 (scroll (load-and-parse local-scroll-name+))
-	 (final-scroll (migrate-scroll-spans-to-permanent-contents
-			(doc-spans scroll) map contents-name)))
-
-    ;; Create the new contents leaf
-    (save-by-name contents-name
-		  (serialize-content-leaf (new-content-leaf contents-name "text" content)))
-
-    ;; Create the finalized document
-    (setf (leaf-sig final-doc) "SIG")
-    (save-by-name (doc-name doc) (serialize-doc final-doc))
-
-    ; Rewrite the scroll to point at the leaf
-    (setf (doc-spans scroll) final-scroll)
-    (save-by-name local-scroll-name+ (serialize-doc scroll))))
-
-(defun create-leaf-map (doc)
-  (merge-all-map-duplicates (get-all-scroll-spans doc)))
-
-(defun get-all-scroll-spans (doc)
-  (collecting (iterate-spans doc (lambda (s) (if (scroll-span-p s) (collect s))))))
-
-(defun iterate-doc (doc on-clip on-link)
-  (mapc on-clip (doc-spans doc))
-  (mapc on-link (doc-links doc)))
-
-(defun iterate-spans (doc on-span)
-  (iterate-doc doc on-span (lambda (l)
-			     (dolist (e (link-endsets l))
-			       (if (span-endset-p e)
-				   (dolist (s (span-endset-spans e))
-				     (funcall on-span s)))))))
-
-(defun replace-spans (doc new-span-fn)
-  (multiple-value-bind (clips links)
-      (with-collectors (clips links)
-	(iterate-doc
-	 doc
-	 (compose #'clips new-span-fn)
-	 (lambda (l)
-	   (let ((new (copy-link l))
-		 (endsets (mapcar (lambda (e)
-				    (if (span-endset-p e)
-					(let ((newe (copy-span-endset e)))
-					  (setf (span-endset-spans newe)
-						(mapcar new-span-fn (span-endset-spans e)))
-					  newe)
-					e))
-				  (link-endsets l))))
-	     (setf (link-endsets new) endsets)
-	     (links new)))))
-    (new-doc-leaf (doc-name doc) clips links)))
-
-(defun merge-all-map-duplicates (spans)
-  "Take a list spans from a map and merge all mergeable spans"
-  (labels ((match (span others)
-	     (if (endp others) (values span nil nil)
-		 (multiple-value-bind (spans merged) (merge-adjacent-spans span (car others))
-		   (if merged
-		       (values (car spans) (cdr others) T)
-		       (multiple-value-bind (new-span other-spans changed)
-			   (match span (cdr others))
-			 (values new-span (cons (car others) other-spans) changed)))))))
-    (if (endp spans) nil
-	(multiple-value-bind (new-span new-spans changed)
-	    (match (car spans) (cdr spans))
-	  (if changed (merge-all-map-duplicates (cons new-span new-spans))
-	      (cons (car spans) (merge-all-map-duplicates (cdr spans))))))))
-
-(defun get-scroll-content-for-map (map)
-  "Returns the content referenced by a map"
-  (let* ((scroll (load-and-parse local-scroll-name+))
-	(index (load-all-contents scroll)))
-    (apply
-     #'concatenate
-     'string
-     (collecting
-       (dolist (span (remove-if-not #'scroll-name-p map :key #'span-origin))
-	 (collect (generate-concatatext-clip
-		   scroll (span-start span) (span-length span) index)))))))
-
-(defun migrate-doc-spans-to-permanent-contents (doc new-origin-name map)
-  (replace-spans
-   doc
-   (lambda (s) (if (scroll-name-p (span-origin s))
-		   (let ((pos 0))
-		     (block nil
-		       (dolist (m map)
-			 (if (span-contains m (span-start s))
-			     (return (span new-origin-name
-					   (+ pos (- (span-start s) (span-start m)))
-					   (span-length s))))
-			 (incf pos (span-length m)))))
-		   s))))
-
-(defun get-leaf-offset-from-map (point map &optional (offset 0))
-  "Find the position in the new leaf that corresponds to an old scroll position"
-  (let ((span (car map)))
-    (if (and (>= point (span-start span)) (< point (span-end span)))
-	(+ offset (- point (span-start span)))
-	(get-leaf-offset-from-map point (cdr map) (+ offset (span-length span))))))
-
-(defun merge-adjacent-spans (1st-span 2nd-span)
-  "Merge two spans if they have the same origin and overlap or are adjacent"
-  (let* ((1st (if (<= (span-start 1st-span) (span-start 2nd-span)) 1st-span 2nd-span))
-	 (2nd (if (eq 1st 2nd-span) 1st-span 2nd-span)))
-    (if (<= (span-start 2nd) (span-end 1st))
-	(values (list (adjust-span-length 1st (- (max (span-end 1st) (span-end 2nd))
-						 (span-start 1st))))
-		T)
-	(values (list 1st 2nd) nil))))
-
-(defun migrate-scroll-spans-to-permanent-contents (spans map leaf-name)
-  "Repoint a scroll's spans from scratch to a new leaf described by map"
-  (labels ((over-scroll (spans pos)
-	     (cond ((endp spans) nil)
-		   ((null (car spans)) (over-scroll (cdr spans) pos))
-		   ((not (scratch-span-p (car spans)))
-		    (cons (car spans) (over-scroll (cdr spans)
-						   (+ pos (span-length (car spans))))))
-		   (T (let ((new (remap-scroll-span (car spans) pos map 0 leaf-name)))
-			(cons (car new) (over-scroll (append (cdr new) (cdr spans))
-						     (+ pos (span-length (car new))))))))))
-    (over-scroll spans 0)))
-
-(defun remap-scroll-span (span pos map mpos leaf-name)
-  "Repoint an individual scoll span from scratch to a new leaf. Returns a list of spans, the
-first of which is rewritten and the second (if any) is the unrewritten remainder."
-  (if (endp map) (return-from remap-scroll-span (list span)))
-  (let* ((m (car map))
-	 (epos (+ pos (span-length span))) ; scroll space position of the end of span
-	 (ms (span-start m))
-	 (mes (span-end m)))
-    (cond
-      ((and (< pos ms) (>= epos ms))
-       (split-span span (- ms pos)))
-      ((and (>= pos ms) (<= epos mes))
-       (list (span leaf-name (+ mpos (- pos ms)) (span-length span))))
-      ((and (>= pos ms) (< pos mes))
-       (let ((split (split-span span (- mes pos))))
-	 (list (span leaf-name (+ mpos (- pos ms)) (span-length (car split)))
-	       (cadr split))))
-      (T (remap-scroll-span span pos (cdr map) (+ mpos (span-length m)) leaf-name)))))
-
-;; Span operations
-
-(defun span-end (span)
-  (+ (span-start span) (span-length span)))
-
-(defun span-contains (span point)
-  (let ((offset (- point (span-start span))))
-    (and (>= offset 0) (< offset (span-length span)))))
-
-(defun scroll-span-p (span)
-  (equal (span-origin span) local-scroll-name+))
-
-(defun scratch-span-p (span)
-  (equal (span-origin span) scratch-name+))
-
-(defun adjust-span-length (span length)
-  (span (span-origin span) (span-start span) length))
-
-(defun adjust-span-start (span start-adjust)
-  (span (span-origin span)
-	(+ (span-start span) start-adjust)
-	(- (span-length span) start-adjust)))
-
-(defun split-span (span length-of-first)
-  (list (adjust-span-length span length-of-first)
-	(adjust-span-start span length-of-first)))
-
-(defun divide-spans (spans division-point)
-  "Divide a list of spans into two lists at the given division point."
-  (let* ((spans spans)
-	 (before
-	  (with-collectors (before)
-	    (labels ((recur (n)
-		       (let* ((span (car spans))
-			      (len (if span (span-length span) 0)))
-			 (cond ((null spans) nil)
-			       ((>= n len) (before span) (pop spans) (recur (- n len)))
-			       ((zerop n) nil)
-			       (T (pop spans)
-				  (let ((split (split-span span n)))
-				    (before (car split))
-				    (push (cadr split) spans)))))))
-	      (recur division-point)))))
-    (list before spans)))
-
-(defun divide-out-section (spans start length)
-  "Divide a list of spans into three lists"
-  (let ((split (divide-spans spans start)))
-    (cons (car split) (divide-spans (cadr split) length))))
-
-(defun merge-spans (1st-list 2nd-list)
-  "Join two lists of spans into one, merging spans if necessary"
-  (let ((1st (car 1st-list)) (2nd (car 2nd-list)))
-    (cond ((null 1st) 2nd-list)
-	  ((endp (cdr 1st-list))
-	   (if (and 2nd (equal (span-origin 1st) (span-origin 2nd))
-		    (= (span-start 2nd) (span-end 1st)))
-	       (cons (span (span-origin 1st) (span-start 1st) (+ (span-length 1st)
-								 (span-length 2nd)))
-		     (cdr 2nd-list))
-	       (cons 1st-list 2nd-list)))
-	  (T (cons 1st (merge-spans (cdr 1st-list) 2nd-list))))))
-
-(defun merge-spans-twice (1st-list 2nd-list 3rd-list)
-  (merge-spans 1st-list (merge-spans 2nd-list 3rd-list)))
-
-(defun extract-range-from-spans (spans start length)
-  "Create spans representing the subset of some other spans delimited by start and length."
-  (second (divide-out-section spans start length)))
-
-(defun insert-spans (spans new-spans n)
-  "Insert a list of spans into the middle of some existing spans."
-  (let ((split (divide-spans spans n)))
-    (merge-spans-twice (car split) new-spans (cadr split))))
-
-(defun delete-spans (spans start length)
-  "Remove a section from some spans."
-  (let ((divided (divide-out-section spans start length)))
-    (append (first divided) (third divided))))
-
-(defun transclude (source-spans start length target-spans insert-point)
-  "Transclude content from one set of spans into another."
-  (insert-spans target-spans
-		(extract-range-from-spans source-spans start length)
-		insert-point))
+	  (serialize-name (span-origin section)) (span-start section) (span-length section)))
 
 ;;; Server
 
@@ -587,12 +572,17 @@ first of which is rewritten and the second (if any) is the unrewritten remainder
 
 ;;; Client
 
+(defun merge-url (&rest parts)
+  (if (endp parts) (return-from merge-url ""))
+  (let ((part (car parts)))
+    (if (string-starts-with "/" part) (setf part (subseq part 1)))
+    (let ((last (1- (length part))))
+      (if (string= #\/ (elt part last)) (setf part (subseq part 0 last))))
+    (concatenate 'string part (if (cdr parts) "/" "") (apply #'merge-url (cdr parts)))))
+
 (defmacro with-http-client (&body body)
   `(let ((http-stream* (if (boundp 'http-stream*) http-stream* nil)))
      ,@body))
-
-(defun leaf-missing (name)
-  (not (probe-file (name-to-path name))))
 
 (defun ensure-leaf (name keep-alive &optional force-download)
   "Make sure a leaf is in the cache, and return its contents"
@@ -621,7 +611,7 @@ first of which is rewritten and the second (if any) is the unrewritten remainder
   (multiple-value-bind (body status-code headers uri new-stream must-close reason-phrase)
       (drakma:http-request
        (merge-url upstream+ "leaf")
-	:parameters (list (cons "name" (print-name name)))
+	:parameters (list (cons "name" (serialize-name name)))
 	:close (not keep-alive)
 	:stream http-stream*)
     (declare (ignore headers) (ignore uri))
