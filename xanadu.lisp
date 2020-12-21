@@ -13,7 +13,7 @@
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
 (defvar repo-path* (sb-posix:getcwd)) ; defaults to current directory
 
-(defstruct span origin start length)
+(defstruct (span :conc-name) origin start len)
 (defstruct leaf name owner type sig)
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) spans links)
@@ -56,26 +56,27 @@
 
 ;;; Span operations
 
-(defun span (origin start length) (make-span :origin origin :start start :length length))
+(defun span (origin start length) (make-span :origin origin :start start :len length))
 
-(defun edit-span (span &key (origin (span-origin span)) (start (span-start span))
-			 (length (span-length span)))
-  (span origin start length))
+(defun edit-span (span &key (origin (origin span)) (start (start span)) (len (len span)))
+  (span origin start len))
 
-(defun span-end (s) (+ (span-start s) (span-length s) -1))
+(defun next-pos (s) (+ (start s) (len s)))
 
-(defun same-origin (s1 s2) (equal (span-origin s1) (span-origin s2)))
+(defun span-end (s) (1- (next-pos s)))
+
+(defun same-origin (s1 s2) (equal (origin s1) (origin s2)))
 
 (defun span-contains (span point &optional (adjustment 0))
-  (let ((offset (- point (span-start span) adjustment)))
-    (and (>= offset 0) (< offset (span-length span)))))
+  (let ((offset (- point (start span) adjustment)))
+    (and (>= offset 0) (< offset (len span)))))
 
 (defun overlapping-p (s1 s2 &key (adjust1 0) (adjust2 0))
-  (not (or (< (+ (span-end s1) adjust1) (+ (span-start s2) adjust2))
-	   (< (+ (span-end s2) adjust2) (+ (span-start s1) adjust1)))))
+  (not (or (< (+ (span-end s1) adjust1) (+ (start s2) adjust2))
+	   (< (+ (span-end s2) adjust2) (+ (start s1) adjust1)))))
 
 (defun abutting-p (s1 s2)
-  (eq 1 (- (span-start s2) (span-end s1))))
+  (eq (next-pos s1) (start s2)))
 
 (defun mergeable-p (s1 s2)
   (and (same-origin s1 s2) (or (overlapping-p s1 s2) (abutting-p s1 s2))))
@@ -85,22 +86,22 @@
 
 (defun merge-spans (s1 s2 &optional only-overlaps)
   (if (if only-overlaps (duplicating-p s1 s2) (mergeable-p s1 s2))
-      (let ((start (min (span-start s1) (span-start s2))))
-	(list (span (span-origin s1) start (1+ (- (max (span-end s1) (span-end s2)) start)))))
+      (let ((start (min (start s1) (start s2))))
+	(list (span (origin s1) start (- (max (next-pos s1) (next-pos s2)) start))))
       (list s1 s2)))
 
 (defun divide-span-at-point (s1 point)
   (with-slots (start length) s1
-    (if (and (span-contains s1 point) (> point (span-start s1)))
-	(list (edit-span s1 :length (- point start))
-	      (edit-span s1 :start (+ start point -1) :length (1+ (- length point))))
+    (if (and (span-contains s1 point) (> point (start s1)))
+	(list (edit-span s1 :len (- point start))
+	      (edit-span s1 :start (+ start point -1) :len (1+ (- length point))))
 	(list s1))))
 
 (defun divide-span (s length)
-  (if (or (zerop length) (>= length (span-length s)))
+  (if (or (zerop length) (>= length (len s)))
       (list s)
-      (list (edit-span s :length length)
-	    (edit-span s :start (+ (span-start s) length) :length (- (span-length s) length)))))
+      (list (edit-span s :len length)
+	    (edit-span s :start (+ (start s) length) :len (- (len s) length)))))
 
 (defun merge-span-lists (list1 list2)
   (let ((lifted (lift list1)))
@@ -125,10 +126,10 @@
   (let ((s (car list)))
     (cond ((endp list) (list (nreverse collected) nil))
 	  ((zerop point) (list (nreverse collected) list))
-	  ((> (span-length s) point)
+	  ((> (len s) point)
 	   (let ((split (divide-span s point)))
 	     (list (nreverse (cons (car split) collected)) (cons (cadr split) (cdr list)))))
-	  (T (divide-list (cdr list) (- point (span-length s)) (cons s collected))))))
+	  (T (divide-list (cdr list) (- point (len s)) (cons s collected))))))
 
 (defun divide-twice (list start length)
   "Divide a list of span into three, with the central section having given start and length"
@@ -157,7 +158,7 @@
   (recur (spans pos) (spans 0)
     (cond ((endp spans) nil)
 	  ((span-contains (car spans) point pos) (values (car spans) pos))
-	  (T (recur (cdr spans) (+ pos (span-length (car spans))))))))
+	  (T (recur (cdr spans) (+ pos (len (car spans))))))))
 
 (defun get-concatatext-position (spans point-origin point &optional (pos 0))
   (with-slots (origin start length) (car spans)
@@ -171,16 +172,15 @@
 parts that do"
   (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
       (collecting
-       (let ((length (- (span-start i) (span-start s))))
-	 (if (> length 0) (collect (edit-span s :length length)))
-	 (let ((start (max (span-start s) (span-start i))))
+       (let ((length (- (start i) (start s))))
+	 (if (> length 0) (collect (edit-span s :len length)))
+	 (let ((start (max (start s) (start i))))
 	   (collect
 	       (funcall fn (edit-span s :start start
-				      :length (1+ (- (min (span-end s) (span-end i)) start)))
+				      :len (- (min (next-pos s) (next-pos i)) start))
 			length))))
        (let ((length (- (span-end s) (span-end i))))
-	 (if (> length 0)
-	     (collect (edit-span s :start (1+ (span-end i)) :length length)))))))
+	 (if (> length 0) (collect (edit-span s :start (next-pos i) :len length)))))))
 
 ;;;; Leaf names
 
@@ -240,13 +240,11 @@ parts that do"
   "Import text from a file"
   (let ((contents (make-fillable-string)))
     (with-open-file (s path)
-      (loop for c = (read-char s nil)
-	 while c
-	 do (vector-push-extend c contents)))
+      (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))
     (new-content-leaf name type contents)))
 
 (defun load-all-contents (spans &optional (index (make-hash-table :test 'equal)))
-  (dolist (a (mapcar #'span-origin spans))
+  (dolist (a (mapcar #'origin spans))
     (when (not (nth-value 1 (gethash a index)))
       (setf (gethash a index) (load-and-parse a))
       (if (scroll-name-p a) (load-all-contents (doc-spans (gethash a index)) index))))
@@ -264,26 +262,25 @@ parts that do"
 
 (defun apply-span (span contents-hash)
   "Extract the text of a span from a collection of contents leaves."
-  (let ((contents (gethash (span-origin span) contents-hash)))
-    (if (scroll-name-p (span-origin span))
-	(generate-concatatext-clip (doc-spans contents) (span-start span) (span-length span)
-				   contents-hash)
-	(subseq (content-leaf-contents contents) (span-start span) (1+ (span-end span))))))
+  (let ((contents (gethash (origin span) contents-hash)))
+    (if (scroll-name-p (origin span))
+	(generate-concatatext-clip (doc-spans contents) (start span) (len span) contents-hash)
+	(subseq (content-leaf-contents contents) (start span) (next-pos span)))))
 
 ;;;; Scrolls and publishing
 
 (defun scroll-span-p (span)
-  (equal (span-origin span) local-scroll-name+))
+  (equal (origin span) local-scroll-name+))
 
 (defun scratch-span-p (span)
-  (equal (span-origin span) scratch-name+))
+  (equal (origin span) scratch-name+))
 
 (defun append-to-local-scroll (content)
   "Append some content to the local private scroll and return the span representing it."
   (let ((scratch (uiop:native-namestring (name-to-path scratch-name+)))
 	(scroll (uiop:native-namestring (name-to-path local-scroll-name+)))
 	(length (length content))
-	(scratch-contents (content-leaf-contents (parse-vector (load-by-name scratch-name+)))))
+	(scratch-contents (content-leaf-contents (load-and-parse scratch-name+))))
     (let* ((span-for-scroll (span scratch-name+ (length scratch-contents) length)))
       (with-open-file (s scratch :direction :output :if-exists :append)
 	(princ content s))
@@ -293,24 +290,23 @@ parts that do"
 	(span local-scroll-name+ scroll-position length)))))
 
 (defun get-next-local-scroll-pos ()
-  (apply #'+ (mapcar #'span-length
-		     (doc-spans (parse-vector (load-by-name local-scroll-name+))))))
+  (apply #'+ (mapcar #'len (doc-spans (load-and-parse local-scroll-name+)))))
 
 (defun migrate-scroll-spans-to-scroll-targets (doc scroll-spans)
   (replace-spans
    doc
    (lambda (s) (if (scroll-span-p s)
-		   (extract-range scroll-spans (span-start s) (span-length s))
+		   (extract-range scroll-spans (start s) (len s))
 		   s))))
 
 (defun get-scratch-spans (doc)
   (collecting (iterate-spans doc (lambda (s) (if (scratch-span-p s) (collect s))))))
 
 (defun build-map-from-scratch-spans (spans)
-  (let ((deduped (deduplicate (sort spans #'< :key #'span-start))))
+  (let ((deduped (deduplicate (sort spans #'< :key #'start))))
     (collecting
       (dolist (s spans)
-	(awhen (find (span-start s) deduped :test (lambda (p s) (span-contains s p)))
+	(awhen (find (start s) deduped :test (lambda (p s) (span-contains s p)))
 	  (collect it)
 	  (setf deduped (remove it deduped)))))))
 
@@ -323,33 +319,33 @@ parts that do"
    (lambda (s)
      (if (scratch-span-p s)
 	 (span leaf-name
-	       (get-concatatext-position map scratch-name+ (span-start s))
-	       (span-length s))
+	       (get-concatatext-position map scratch-name+ (start s))
+	       (len s))
 	 s))))
 
 (defun rewrite-scratch-span (span map pos leaf-name)
   (cond ((endp map) (list span))
 	(T (mapcan (lambda (s)
 		     (rewrite-scratch-span
-		      s (cdr map) (+ pos (span-length (car map))) leaf-name))
+		      s (cdr map) (+ pos (len (car map))) leaf-name))
 		   (transform-intersection
 		    span
 		    (car map)
-		    (lambda (x p) (span leaf-name (+ pos p) (span-length x))))))))
+		    (lambda (x p) (span leaf-name (+ pos p) (len x))))))))
 
 (defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
   (mapcan (lambda (s) (rewrite-scratch-span s map 0 leaf-name)) scroll-spans))
 
 ;; TODO passing a name is a workaround until it is calculated
 (defun publish (doc leaf-name)
-  (let* ((scroll (load-and-parse local-scroll-name+))
-	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc (doc-spans scroll)))
+  (let* ((scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
+	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc scroll-spans))
 	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch)))
 	 (new-leaf (create-leaf-from-map map leaf-name))
 	 (fully-migrated
 	  (migrate-scratch-spans-to-leaf migrated-to-scratch map (leaf-name new-leaf)))
 	 (migrated-scroll-spans
-	  (migrate-scroll-spans-to-leaf (doc-spans scroll) map (leaf-name new-leaf))))
+	  (migrate-scroll-spans-to-leaf scroll-spans map (leaf-name new-leaf))))
     (save-leaf new-leaf)
     (save-leaf fully-migrated)
     (save-leaf (new-doc-leaf local-scroll-name+ migrated-scroll-spans nil))))
@@ -549,7 +545,7 @@ parts that do"
 
 (defun serialize-span-section (section)
   (format nil "~A,start=~A,length=~A"
-	  (serialize-name (span-origin section)) (span-start section) (span-length section)))
+	  (serialize-name (origin section)) (start section) (len section)))
 
 ;;; Server
 
@@ -600,11 +596,12 @@ parts that do"
 	(if (not (ensure-leaf name T force-download)) (not-found name))))))
 
 (defun download-folio (doc-name &optional force-download)
-  "Download a doc and all leaves required to make up its spans, returns those that weren't found"
+  "Download a doc and all leaves required to make up its spans, returns those that weren't
+found"
   (with-http-client
     (let ((doc (ensure-leaf doc-name T force-download)))
       (when doc
-	(ensure-leaves (mapcar #'span-origin (doc-spans (parse-vector doc)))
+	(ensure-leaves (mapcar #'origin (doc-spans (parse-vector doc)))
 		       force-download)))))
 
 (defun get-leaf-from-server (name keep-alive)
