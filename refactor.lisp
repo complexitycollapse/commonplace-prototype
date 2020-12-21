@@ -1,5 +1,9 @@
 ;;;; refactor.lisp
 
+(defmacro awhen (test &body body)
+  `(let ((,(intern "IT") ,test))
+     (when ,(intern "IT") ,@body)))
+
 (defun lift (list &optional others)
   (cond ((endp list) nil)
 	((endp (cdr list)) (cons (car list) (reverse others)))
@@ -55,7 +59,7 @@
   (and (same-origin s1 s2) (or (overlapping-p s1 s2) (abutting-p s1 s2))))
 
 (defun duplicating-p (s1 s2)
-  (and (same-origin s1 s2) (or (overlapping-p s1 s2))))
+  (and (same-origin s1 s2) (overlapping-p s1 s2)))
 
 (defun merge-spans (s1 s2 &optional only-overlaps)
   (if (if only-overlaps (duplicating-p s1 s2) (mergeable-p s1 s2))
@@ -89,8 +93,8 @@
 (defun deduplicate (list)
   (if (endp (cdr list)) list
       (let ((merged (merge-spans (car list) (cadr list) T)))
-	(if (cadr merged) (cons (car list) (merge-all (cdr list)))
-	    (merge-all (cons (car merged) (cddr list)))))))
+	(if (cadr merged) (cons (car list) (deduplicate (cdr list)))
+	    (deduplicate (cons (car merged) (cddr list)))))))
 
 (defun divide-list (list point &optional collected)
   "Point is included in the second list"
@@ -127,6 +131,22 @@
 	  ((span-contains (car spans) point pos) (values (car spans) pos))
 	  (T (recur (cdr spans) (+ pos (span-length (car spans))))))))
 
+(defun transform-intersection (s i fn)
+  "Breaks s into a list of spans according to which parts overlap with i, calling fn on the
+parts that do"
+  (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
+      (collecting
+       (let ((length (- (span-start i) (span-start s))))
+	 (if (> length 0) (collect (edit-span s :length length)))
+	 (let ((start (max (span-start s) (span-start i))))
+	   (collect
+	       (funcall fn (edit-span s :start start
+				      :length (1+ (- (min (span-end s) (span-end i)) start)))
+			length))))
+       (let ((length (- (span-end s) (span-end i))))
+	 (if (> length 0)
+	     (collect (edit-span s :start (1+ (span-end i)) :length length)))))))
+
 ;;;; Leaf operations
 
 (defun save-leaf (leaf)
@@ -157,12 +177,12 @@
     (if (scroll-name-p (span-origin span))
 	(generate-concatatext-clip (doc-spans contents) (span-start span) (span-length span)
 				   contents-hash)
-	(subseq (content-leaf-contents contents) (span-start span) (span-end span)))))
+	(subseq (content-leaf-contents contents) (span-start span) (1+ (span-end span))))))
 
 (defun get-concatatext-position (spans point-origin point &optional (pos 0))
   (with-slots (origin start length) (car spans)
     (cond ((endp spans) nil)
-	  ((and (equal origin point-origin) (span-contains (car spans) point pos))
+	  ((and (equal origin point-origin) (span-contains (car spans) point))
 	   (values (+ pos (- point start)) (car spans)))
 	  (T (get-concatatext-position (cdr spans) point-origin point (+ pos length))))))
 
@@ -206,9 +226,9 @@
   (let ((deduped (deduplicate (sort spans #'< :key #'span-start))))
     (collecting
       (dolist (s spans)
-	(let ((match (find (span-start s) deduped :test (lambda (p s) (span-contains s p)))))
-	  (collect match)
-	  (setf spans (remove match spans)))))))
+	(awhen (find (span-start s) deduped :test (lambda (p s) (span-contains s p)))
+	  (collect it)
+	  (setf deduped (remove it deduped)))))))
 
 (defun create-leaf-from-map (map name)
   (new-content-leaf name "text" (generate-concatatext map)))
@@ -223,34 +243,18 @@
 	       (span-length s))
 	 s))))
 
-(defun transform-intersection (s i fn)
-  (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
-      (collecting
-       (let ((length (- (span-start i) (span-start s))))
-	 (if (> length 0) (collect (edit-span s :length length)))
-	 (let ((start (max (span-start s) (span-start i))))
-	   (collect
-	       (funcall fn (edit-span s :start start
-				      :length (1+ (- (min (span-end s) (span-end i)) start)))
-			length))))
-       (let ((length (- (span-end s) (span-end i))))
-	 (if (> length 0)
-	     (collect (edit-span s :start (1+ (span-end i)) :length length)))))))
-
 (defun rewrite-scratch-span (span map pos leaf-name)
   (cond ((endp map) (list span))
-	(T (apply #'append
-		  (mapcar (lambda (s)
-			    (rewrite-scratch-span
-			     s (cdr map) (+ pos (span-length (car map))) leaf-name))
-			  (transform-intersection
-			   span
-			   (car map)
-			   (lambda (x p) (span leaf-name (+ pos p) (span-length x)))))))))
+	(T (mapcan (lambda (s)
+		     (rewrite-scratch-span
+		      s (cdr map) (+ pos (span-length (car map))) leaf-name))
+		   (transform-intersection
+		    span
+		    (car map)
+		    (lambda (x p) (span leaf-name (+ pos p) (span-length x))))))))
 
 (defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
-  (apply #'append (mapcar (lambda (s) (rewrite-scratch-span s map 0 leaf-name))
-			  scroll-spans)))
+  (mapcan (lambda (s) (rewrite-scratch-span s map 0 leaf-name)) scroll-spans))
 
 ;; TODO passing a name is a workaround until it is calculated
 (defun publish (doc leaf-name)
