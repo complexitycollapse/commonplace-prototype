@@ -1,0 +1,8 @@
+* TODO Calculate signatures
+* TODO CLI
+* TODO Move scratch out of "public"
+* TODO Figure out how to handle different types of data
+* TODO Write up markdown file
+* TODO Rename to Commonplace
+* TODO Bug: appending to scroll does not merge spans
+* TODO Bounds checking (e.g. trying to edit beyond the end of a doc)

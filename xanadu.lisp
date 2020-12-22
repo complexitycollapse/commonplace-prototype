@@ -153,6 +153,10 @@
   (let ((div (divide-twice spans start length)))
     (merge-span-lists (first div) (third div))))
 
+(defun move-spans (spans start length new-pos)
+  (let ((div (divide-twice spans start length)))
+    (insert-spans (merge-span-lists (first div) (third div)) (second div) new-pos)))
+
 (defun transclude (source-spans start length target-spans insert-point)
   "Transclude content from one set of spans into another."
   (insert-spans target-spans (extract-range source-spans start length) insert-point))
