@@ -54,6 +54,9 @@
   (and (>= (length string) (length prefix))
        (string= prefix string :end2 (length prefix))))
 
+(defmacro pushend (x place)
+  `(if ,place (setf (cdr (last ,place)) (list ,x)) (setf ,place (list ,x))))
+
 ;;; Span operations
 
 (defun span (origin start length) (make-span :origin origin :start start :len length))
@@ -161,11 +164,11 @@
 	  (T (recur (cdr spans) (+ pos (len (car spans))))))))
 
 (defun get-concatatext-position (spans point-origin point &optional (pos 0))
-  (with-slots (origin start length) (car spans)
+  (with-slots (origin start len) (car spans)
     (cond ((endp spans) nil)
 	  ((and (equal origin point-origin) (span-contains (car spans) point))
 	   (values (+ pos (- point start)) (car spans)))
-	  (T (get-concatatext-position (cdr spans) point-origin point (+ pos length))))))
+	  (T (get-concatatext-position (cdr spans) point-origin point (+ pos len))))))
 
 (defun transform-intersection (s i fn)
   "Breaks s into a list of spans according to which parts overlap with i, calling fn on the
@@ -181,6 +184,9 @@ parts that do"
 			length))))
        (let ((length (- (span-end s) (span-end i))))
 	 (if (> length 0) (collect (edit-span s :start (next-pos i) :len length)))))))
+
+(defun append-new-text (doc text)
+  (pushend (append-to-local-scroll text) (doc-spans doc)))
 
 ;;;; Leaf names
 
@@ -303,7 +309,7 @@ parts that do"
   (collecting (iterate-spans doc (lambda (s) (if (scratch-span-p s) (collect s))))))
 
 (defun build-map-from-scratch-spans (spans)
-  (let ((deduped (deduplicate (sort spans #'< :key #'start))))
+  (let ((deduped (deduplicate (sort (copy-list spans) #'< :key #'start))))
     (collecting
       (dolist (s spans)
 	(awhen (find (start s) deduped :test (lambda (p s) (span-contains s p)))
