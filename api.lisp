@@ -41,8 +41,14 @@
     (if exists (delete-file (name-to-path (ensure-parsed name))))
     exists))
 
-(defun import-file (new-leaf-name path)
-  (save-leaf (create-content-from-file (ensure-parsed new-leaf-name) "text" path)))
+(defun import-file (new-leaf-name path &optional doc-to-add-to insert-point start length)
+  (save-leaf (create-content-from-file (ensure-parsed new-leaf-name) "text" path))
+  (if doc-to-add-to (include-from-leaf doc-to-add-to insert-point new-leaf-name start length)))
+
+(defun include-from-leaf (doc-name insert-point leaf-name start length)
+  (modify-spans doc-name
+		(lambda (spans)
+		  (insert-spans spans (list (span leaf-name start length)) insert-point))))
 
 (defun export-text (name output-filename)
   (let ((doc (safe-load-doc name)))
