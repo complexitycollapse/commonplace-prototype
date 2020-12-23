@@ -6,3 +6,4 @@
 * TODO Rename to Commonplace
 * TODO Bug: appending to scroll does not merge spans
 * TODO Bounds checking (e.g. trying to edit beyond the end of a doc)
+* TODO Move links to their own files
