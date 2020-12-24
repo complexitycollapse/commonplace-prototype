@@ -1,12 +1,12 @@
-;;;; xanadu.lisp
+;;;; commonplace.lisp
 
-(in-package #:xanadu)
+(in-package #:commonplace)
 
 (defparameter local-scroll-name+ '(:scroll "local"))
 (defparameter scratch-name+ '(0))
 (defparameter editable-signature+ "EDITABLE")
 (defparameter upstream+ "http://localhost:4242/")
-(defparameter test-repo+ "~/lisp/xanadu/test-repo")
+(defparameter test-repo+ "~/lisp/commonplace/test-repo")
 (defparameter user+ "Me")
 
 (defvar acceptor* nil)

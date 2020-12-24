@@ -1,6 +1,6 @@
 ;;;; api.lisp
 
-(in-package #:cla)
+(in-package #:cp-api)
 
 (defun new-doc (name)
   (setf name (ensure-parsed name))

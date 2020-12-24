@@ -1,6 +1,6 @@
 ;;;; package.lisp
 
-(defpackage #:xanadu
+(defpackage #:commonplace
   (:use #:cl #:cl-utilities)
   (:export
    :leaf-missing :save-leaf :new-doc-leaf :pushend :append-to-local-scroll :insert-spans
@@ -8,7 +8,7 @@
    :parse-name :transclude :get-next-version-name :name-to-path :create-content-from-file
    :new-content-leaf :generate-concatatext :download-folio :len :span))
 
-(defpackage #:cla
-  (:use #:xanadu #:cl)
+(defpackage #:cp-api
+  (:use #:commonplace #:cl)
   (:export
    :new-doc :append-text :insert-text :delete-text :move-text :transclude))
