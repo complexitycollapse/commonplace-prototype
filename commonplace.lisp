@@ -393,7 +393,7 @@ parts that do"
 		((:scroll :local-scroll) (list "scrolls/" parts))
 		(:doc (list "public/" (format nil "~{~A~^_~}" parts)))
 		(:content (list "public/" (format nil "~{~A~^_~}" parts)))
-		(:scratch (list "public/" (format nil "~{~A~^_~}" parts)))
+		(:scratch (list (format nil "~{~A~^_~}" parts)))
 		(:link (list "public/" (format nil "~{~A~^_~}" parts))))))
     (apply #'cl-fad:merge-pathnames-as-file (repo-path) sub)))
 
