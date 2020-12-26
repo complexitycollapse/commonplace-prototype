@@ -398,19 +398,12 @@ parts that do"
     (apply #'cl-fad:merge-pathnames-as-file (repo-path) sub)))
 
 (defun init ()
-  (labels ((make-file (name type)
-	     (with-open-file (s (name-to-path name)
-				:direction :output
-				:if-exists :overwrite
-				:if-does-not-exist :create)
-	       (write-line (serialize-name name) s)
-	       (write-line user+ s)
-	       (write-line type s)
-	       (write-line "-" s))))
-    (ensure-directories-exist (public-path))
-    (ensure-directories-exist (scrolls-path))
-    (make-file local-scroll-name+ "scroll")
-    (make-file scratch-name+ "scratch")))
+  (ensure-directories-exist (cl-fad:merge-pathnames-as-directory (repo-path) "public/"))
+  (ensure-directories-exist (cl-fad:merge-pathnames-as-directory (repo-path) "scrolls/"))
+  (save-leaf (make-doc :name local-scroll-name+ :owner user+ :sig editable-signature+
+		       :type "local-scroll"))
+  (save-leaf (make-content-leaf :name scratch-name+ :owner user+ :sig editable-signature+
+				:type "scratch")))
 
 (defun load-and-parse (name)
   (parse-vector (load-by-name name)))
@@ -446,7 +439,7 @@ parts that do"
 	   (contents (make-fillable-string)))
       (assert (string= content-separator "-"))
       (drain s (lambda (c) (vector-push-extend c contents)))
-      (if (or (string= type "doc") (string= type "scroll"))
+      (if (or (string= type "doc") (string= type "scroll") (string= type "local-scroll"))
 	  (let ((spans-links (parse-doc-contents contents)))
 	    (make-doc :sig sig
 		      :name name
