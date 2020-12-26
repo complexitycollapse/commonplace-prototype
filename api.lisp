@@ -37,12 +37,14 @@
     (save-leaf (new-version (ensure-parsed existing-name) actual-name))))
 
 (defun delete-leaf (name)
-  (let ((exists (leaf-exists name)))
+  (let ((exists (leaf-exists name))) ; TODO similar problem to below
     (if exists (delete-file (name-to-path (ensure-parsed name))))
+					; TODO This cannot delete non-doc leaves
+					; due to ENSURE-PARSED implementation. Fix that.
     exists))
 
 (defun import-file (new-leaf-name path &optional doc-to-add-to insert-point start length)
-  (save-leaf (create-content-from-file (ensure-parsed new-leaf-name) "text" path))
+  (save-leaf (create-content-from-file (ensure-parsed new-leaf-name "content") path))
   (if doc-to-add-to (include-from-leaf doc-to-add-to insert-point new-leaf-name start length)))
 
 (defun include-from-leaf (doc-name insert-point leaf-name start length)
@@ -77,4 +79,5 @@
 
 (defun leaf-exists (name) (not (leaf-missing (ensure-parsed name))))
 
-(defun ensure-parsed (name) (if (stringp name) (parse-name name) name))
+(defun ensure-parsed (name &optional (type "doc"))
+  (if (stringp name) (parse-name name type) name))

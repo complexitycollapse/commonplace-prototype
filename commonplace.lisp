@@ -2,8 +2,18 @@
 
 (in-package #:commonplace)
 
-(defparameter local-scroll-name+ '(:scroll "local"))
-(defparameter scratch-name+ '(0))
+(defstruct (span :conc-name) origin start len)
+(defstruct name type parts)
+(defstruct leaf name owner type sig)
+(defstruct (content-leaf (:include leaf)) contents)
+(defstruct (doc (:include leaf)) spans links)
+(defstruct link type endsets)
+(defstruct endset name)
+(defstruct (span-endset (:include endset)) spans)
+(defstruct (doc-endset (:include endset)) doc-name)
+
+(defparameter local-scroll-name+ (make-name :type :local-scroll :parts "local"))
+(defparameter scratch-name+ (make-name :type :scratch :parts '(0)))
 (defparameter editable-signature+ "EDITABLE")
 (defparameter upstream+ "http://localhost:4242/")
 (defparameter test-repo+ "~/lisp/commonplace/test-repo")
@@ -12,15 +22,6 @@
 (defvar acceptor* nil)
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
 (defvar repo-path* (sb-posix:getcwd)) ; defaults to current directory
-
-(defstruct (span :conc-name) origin start len)
-(defstruct leaf name owner type sig)
-(defstruct (content-leaf (:include leaf)) contents)
-(defstruct (doc (:include leaf)) spans links)
-(defstruct link type endsets)
-(defstruct endset name)
-(defstruct (span-endset (:include endset)) spans)
-(defstruct (doc-endset (:include endset)) doc-name)
 
 ;;;; Common functions
 
@@ -194,10 +195,18 @@ parts that do"
 
 ;;;; Leaf names
 
-(defun scroll-name-p (parts) (and (listp parts) (eq (car parts) :scroll)))
+(defun scroll-name-p (name) (or (eq (name-type name) :scroll) (local-scroll-name-p name)))
+(defun doc-name-p (name) (eq (name-type name) :doc))
+(defun content-name-p (name) (eq (name-type name) :content))
+(defun link-name-p (name) (eq (name-type name) :link))
+(defun local-scroll-name-p (name) (eq (name-type name) :local-scroll))
+(defun scratch-name-p (name) (eq (name-type name) :scratch))
 
 (defun get-next-version-name (old-name)
-  (nconc (butlast old-name) (list (1+ (car (last old-name))))))
+  (if (doc-name-p old-name)
+      (let ((parts (name-parts old-name)))
+	(make-name :type :doc :parts (nconc (butlast parts) (list (1+ (car (last parts)))))))
+      (error "Can only get next version for a doc name")))
 
 ;;;; Leaf operations
 
@@ -235,8 +244,8 @@ parts that do"
 
 (defun editable-p (leaf) (equal editable-signature+ (leaf-sig leaf)))
 
-(defun new-content-leaf (name type text)
-  (make-content-leaf :name name :owner user+ :sig "SIG" :type type
+(defun new-content-leaf (name text)
+  (make-content-leaf :name name :owner user+ :sig "SIG" :type "content"
 		     :contents text))
 
 (defun new-doc-leaf (name &optional spans links)
@@ -246,12 +255,12 @@ parts that do"
 (defun new-version (doc &optional (new-name (get-next-version-name (leaf-name doc))))
   (new-doc-leaf new-name (doc-spans doc) (doc-links doc)))
 
-(defun create-content-from-file (name type path)
+(defun create-content-from-file (name path)
   "Import text from a file"
   (let ((contents (make-fillable-string)))
     (with-open-file (s path)
       (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))
-    (new-content-leaf name type contents)))
+    (new-content-leaf name contents)))
 
 (defun load-all-contents (spans &optional (index (make-hash-table :test 'equal)))
   (dolist (a (mapcar #'origin spans))
@@ -321,7 +330,7 @@ parts that do"
 	  (setf deduped (remove it deduped)))))))
 
 (defun create-leaf-from-map (map name)
-  (new-content-leaf name "text" (generate-concatatext map)))
+  (new-content-leaf name (generate-concatatext map)))
 
 (defun migrate-scratch-spans-to-leaf (doc map leaf-name)
   (replace-spans
@@ -376,20 +385,17 @@ parts that do"
 (defun set-test-repo ()
   (setf repo-path* test-repo+))
 
-(defun to-file-name (parts)
-  (if (scroll-name-p parts)
-      (cadr parts)
-      (format nil "~{~A~^_~}" parts)))
-
-(defun scrolls-path ()
-  (cl-fad:merge-pathnames-as-directory (cl-fad:pathname-as-directory repo-path*) "scrolls/"))
-
-(defun public-path ()
-  (cl-fad:merge-pathnames-as-directory (cl-fad:pathname-as-directory repo-path*) "public/"))
+(defun repo-path () (cl-fad:pathname-as-directory repo-path*))
 
 (defun name-to-path (name)
-  (let ((subdirectory (if (scroll-name-p name) (scrolls-path) (public-path))))
-    (cl-fad:merge-pathnames-as-file subdirectory (to-file-name name))))
+  (let* ((parts (name-parts name))
+	 (sub (ecase (name-type name)
+		((:scroll :local-scroll) (list "scrolls/" parts))
+		(:doc (list "public/" (format nil "~{~A~^_~}" parts)))
+		(:content (list "public/" (format nil "~{~A~^_~}" parts)))
+		(:scratch (list "public/" (format nil "~{~A~^_~}" parts)))
+		(:link (list "public/" (format nil "~{~A~^_~}" parts))))))
+    (apply #'cl-fad:merge-pathnames-as-file (repo-path) sub)))
 
 (defun init ()
   (labels ((make-file (name type)
@@ -432,12 +438,12 @@ parts that do"
 
 (defun parse-vector (v)
   (with-input-from-string (s v)
-    (let ((sig (read-line s))
-	  (name (parse-name (read-line s)))
-	  (owner (read-line s))
-	  (type (read-line s))
-	  (content-separator (read-line s))
-	  (contents (make-fillable-string)))
+    (let* ((sig (read-line s))
+	   (type (read-line s))
+	   (name (parse-name (read-line s) type))
+	   (owner (read-line s))
+	   (content-separator (read-line s))
+	   (contents (make-fillable-string)))
       (assert (string= content-separator "-"))
       (drain s (lambda (c) (vector-push-extend c contents)))
       (if (or (string= type "doc") (string= type "scroll"))
@@ -454,10 +460,13 @@ parts that do"
 			     :type type
 			     :contents contents)))))
 
-(defun parse-name (name-string)
-  (if (string-starts-with "scroll/" name-string)
-      (list :scroll (subseq name-string 7))
-      (mapcar #'parse-integer (split-sequence #\. name-string))))
+(defun parse-name (name-string type)
+  (let ((real-type (if (stringp type) (intern (string-upcase type) (symbol-package :foo))
+		       type)))
+    (make-name :type real-type
+	       :parts (if (string-starts-with "scroll/" name-string)
+			  (list :scroll (subseq name-string 7))
+			  (mapcar #'parse-integer (split-sequence #\. name-string))))))
 
 (defun parse-doc-contents (contents)
   "Parses the contents part of a leaf as if it were a document, returning (list spans links)."
@@ -486,7 +495,7 @@ parts that do"
     (assert (= (length parts) 3))
     (assert (string-starts-with "start=" (second parts)))
     (assert (string-starts-with "length=" (third parts)))
-    (span (parse-name (first parts))
+    (span (parse-name (first parts) :content)
 	   (read-from-string (subseq (second parts) 6))
 	  (read-from-string (subseq (third parts) 7)))))
 
@@ -510,7 +519,7 @@ parts that do"
     (mapcar #'parse-span-section nested-spans)))
 
 (defun parse-doc-ref (doc)
-  (parse-name (subseq doc 4)))
+  (parse-name (subseq doc 4) :doc))
 
 ;;;; Serializing leaves
 
@@ -520,18 +529,18 @@ parts that do"
 (defun serialize-content-leaf (leaf)
   (concatenate 'string (serialize-leaf-header leaf) (content-leaf-contents leaf)))
 
-(defun serialize-name (parts)
-  (if (scroll-name-p parts)
-      (format nil "scroll/~A" (cadr parts))
-      (format nil "~{~A~^.~}" parts)))
+(defun serialize-name (name)
+  (if (scroll-name-p name)
+      (format nil "scroll/~A" (name-parts name))
+      (format nil "~{~A~^.~}" (name-parts name))))
 
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
     (labels ((p (str) (format s "~A~%" str)))
       (p (leaf-sig leaf))
+      (p (leaf-type leaf))
       (p (serialize-name (leaf-name leaf)))
       (p (leaf-owner leaf))
-      (p (leaf-type leaf))
       (p "-"))))
 
 (defun serialize-doc-contents (doc)
@@ -572,7 +581,8 @@ parts that do"
 
 (defun init-acceptor ()  (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
     (setf (hunchentoot:content-type*) "text/plain") ; how should this be handled?
-    (let ((leaf (load-by-name (parse-name name))))
+					; TODO Cannot assume :CONTENT below
+    (let ((leaf (load-by-name (parse-name name :content))))
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
       leaf)))
 
