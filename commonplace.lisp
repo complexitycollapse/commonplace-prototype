@@ -296,16 +296,16 @@ parts that do"
 
 (defun append-to-local-scroll (content)
   "Append some content to the local private scroll and return the span representing it."
-  (let ((scratch (uiop:native-namestring (name-to-path scratch-name+)))
-	(scroll (uiop:native-namestring (name-to-path local-scroll-name+)))
+  (let ((scratch-path (uiop:native-namestring (name-to-path scratch-name+)))
 	(length (length content))
-	(scratch-contents (content-leaf-contents (load-and-parse scratch-name+))))
+	(scratch-contents (content-leaf-contents (load-and-parse scratch-name+)))
+	(scroll (load-and-parse local-scroll-name+)))
     (let* ((span-for-scroll (span scratch-name+ (length scratch-contents) length)))
-      (with-open-file (s scratch :direction :output :if-exists :append)
+      (with-open-file (s scratch-path :direction :output :if-exists :append)
 	(princ content s))
       (let ((scroll-position (get-next-local-scroll-pos)))
-	(with-open-file (s scroll :direction :output :if-exists :append)
-	  (princ (serialize-span-line span-for-scroll) s))
+	(setf (doc-spans scroll) (merge-span-lists (doc-spans scroll) (list span-for-scroll)))
+	(save-leaf scroll)
 	(span local-scroll-name+ scroll-position length)))))
 
 (defun get-next-local-scroll-pos ()
@@ -456,10 +456,13 @@ parts that do"
 (defun parse-name (name-string type)
   (let ((real-type (if (stringp type) (intern (string-upcase type) (symbol-package :foo))
 		       type)))
-    (make-name :type real-type
-	       :parts (if (string-starts-with "scroll/" name-string)
-			  (list :scroll (subseq name-string 7))
-			  (mapcar #'parse-integer (split-sequence #\. name-string))))))
+    (if (string= "0" name-string) scratch-name+
+	(make-name
+	 :type real-type
+	 :parts
+	 (cond
+	   ((string-starts-with "scroll/" name-string) (subseq name-string 7))
+	   (T (mapcar #'parse-integer (split-sequence #\. name-string))))))))
 
 (defun parse-doc-contents (contents)
   "Parses the contents part of a leaf as if it were a document, returning (list spans links)."

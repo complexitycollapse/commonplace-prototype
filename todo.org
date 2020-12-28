@@ -4,7 +4,7 @@
 * TODO Figure out how to handle different types of data
 * TODO Write up markdown file
 * DONE Rename to Commonplace
-* TODO Bug: appending to scroll does not merge spans
+* DONE Bug: appending to scroll does not merge spans
 * TODO Bounds checking (e.g. trying to edit beyond the end of a doc)
 * TODO Move links to their own files
 * TODO API for links
