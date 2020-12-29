@@ -652,7 +652,7 @@ found"
 	(T #\=)))
 
 (defun decode-char (c)
-  (position c "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="))
+  (or (position c "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/") 0))
 
 (defun compute-sextets (a b c)
   (list (ash (logand a #xFC) -2)
@@ -660,8 +660,20 @@ found"
 	(if b (logior (ash (logand b #xF) 2) (ash (logand (or c 0) #xC0) -6)) 64)
 	(if c (logand c #x3F) 64)))
 
-(defun encode-octets (&rest chars)
+(defun compute-octets (a b c d)
+  (list (logior (ash a 2) (ash (logand b 48) -4))
+	(logior (ash (logand b 15) 4) (ash (logand c 60) -2))
+	(logior (ash (logand c 3) 6) d)))
+
+(defun encode-chars (&rest chars)
   (mapcar #'encode-sextet (apply #'compute-sextets (mapcar #'safe-char-code chars))))
+
+(defun decode-chars (&rest chars)
+  (let ((codes (apply #'compute-octets (mapcar #'decode-char chars))))
+    (do ((c (car (last codes)) (car (last codes))))
+	((not (zerop c)))
+      (setf codes (butlast codes)))
+    (mapcar #'code-char codes)))
 
 (defun safe-char-code (c) (if c (char-code c)))
 
@@ -671,4 +683,13 @@ found"
 		     for b = (read-char s nil nil)
 		     for c = (read-char s nil nil)
 		     while a
-		     collect (encode-octets a b c))))
+		     collect (encode-chars a b c))))
+
+(defun base64-decode-stream (s)
+  (apply #'append (loop
+		     for a = (read-char s nil nil)
+		     while a
+		     for b = (read-char s)
+		     for c = (read-char s)
+		     for d = (read-char s)
+		     collect (decode-chars a b c d))))

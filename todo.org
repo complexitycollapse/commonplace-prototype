@@ -8,3 +8,4 @@
 * TODO Bounds checking (e.g. trying to edit beyond the end of a doc)
 * TODO Move links to their own files
 * TODO API for links
+* TODO Base64 encoding doesn't work for UTF-8. Need to convert to binary properly
