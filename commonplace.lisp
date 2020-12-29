@@ -37,6 +37,10 @@
   `(let ((,(intern "IT") ,test))
      (when ,(intern "IT") ,@body)))
 
+(defmacro aif (a b c)
+  `(let ((,(intern "IT") ,a))
+     (if ,(intern "IT") ,b ,c)))
+
 (defun lift (list &optional others)
   (cond ((endp list) nil)
 	((endp (cdr list)) (cons (car list) (reverse others)))
@@ -636,3 +640,35 @@ found"
       (404 nil)
       (200 body)
       (otherwise (error "Server returned ~A, reason:'~A'" status-code reason-phrase)))))
+
+;;;; Signatures
+
+(defun encode-sextet (s)
+  (cond ((< s 26) (code-char (+ 65 s)))
+	((< s 52) (code-char (+ 71 s)))
+	((< s 62) (code-char (- s 4)))
+	((= s 62) #\+)
+	((= s 63) #\/)
+	(T #\=)))
+
+(defun decode-char (c)
+  (position c "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="))
+
+(defun compute-sextets (a b c)
+  (list (ash (logand a #xFC) -2)
+	(logior (ash (logand a 3) 4) (ash (logand (or b 0) #xF0) -4))
+	(if b (logior (ash (logand b #xF) 2) (ash (logand (or c 0) #xC0) -6)) 64)
+	(if c (logand c #x3F) 64)))
+
+(defun encode-octets (&rest chars)
+  (mapcar #'encode-sextet (apply #'compute-sextets (mapcar #'safe-char-code chars))))
+
+(defun safe-char-code (c) (if c (char-code c)))
+
+(defun base64-encode-stream (s)
+  (apply #'append (loop
+		     for a = (read-char s nil nil)
+		     for b = (read-char s nil nil)
+		     for c = (read-char s nil nil)
+		     while a
+		     collect (encode-octets a b c))))
