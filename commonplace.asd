@@ -6,7 +6,7 @@
   :license  "Specify license here"
   :version "0.0.1"
   :serial t
-  :depends-on (:cl-utilities :osicat :hunchentoot :drakma :cl-fad)
+  :depends-on (:cl-utilities :osicat :hunchentoot :drakma :cl-fad :ironclad)
   :components ((:file "packages")
                (:file "commonplace")
 	       (:file "api")))

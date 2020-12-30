@@ -641,7 +641,7 @@ found"
       (200 body)
       (otherwise (error "Server returned ~A, reason:'~A'" status-code reason-phrase)))))
 
-;;;; Signatures
+;;;; Base64
 
 (defun encode-sextet (s)
   (cond ((< s 26) (code-char (+ 65 s)))
@@ -693,3 +693,11 @@ found"
 		     for c = (read-char s)
 		     for d = (read-char s)
 		     collect (decode-chars a b c d))))
+
+;;;; Signatures
+
+(defun get-digest (str)
+  (ironclad:digest-sequence :sha256 (ironclad:ascii-string-to-byte-array str)))
+
+(defun create-signature (str key)
+  (ironclad:sign-message key (get-digest str)))
