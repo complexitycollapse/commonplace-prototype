@@ -413,9 +413,7 @@ parts that do"
   (parse-vector (load-by-name name)))
 
 (defun save-leaf (leaf)
-  (cond ((content-leaf-p leaf) (save-by-name (leaf-name leaf) (serialize-content-leaf leaf)))
-	((doc-p leaf) (save-by-name (leaf-name leaf) (serialize-doc leaf)))
-	(T (error "Should be a leaf: ~A" leaf))))
+  (save-by-name (leaf-name leaf) (serialize-leaf leaf)))
 
 (defun load-by-name (name)
   (let ((file (make-fillable-string)))
@@ -523,11 +521,9 @@ parts that do"
 
 ;;;; Serializing leaves
 
-(defun serialize-doc (doc)
-  (concatenate 'string (serialize-leaf-header doc) (serialize-doc-contents doc)))
-
-(defun serialize-content-leaf (leaf)
-  (concatenate 'string (serialize-leaf-header leaf) (content-leaf-contents leaf)))
+(defun serialize-leaf (leaf)
+  (concatenate 'string (serialize-leaf-header leaf)
+	       (if (doc-p leaf) (serialize-doc-contents leaf) (content-leaf-contents leaf))))
 
 (defun serialize-name (name)
   (if (scroll-name-p name)
@@ -696,8 +692,13 @@ found"
 
 ;;;; Signatures
 
-(defun get-digest (str)
-  (ironclad:digest-sequence :sha256 (ironclad:ascii-string-to-byte-array str)))
+(defun get-position-of-second-line (string)
+  (with-input-from-string (s string) (1+ (length (read-line s)))))
 
-(defun create-signature (str key)
-  (ironclad:sign-message key (get-digest str)))
+(defun get-digest-for-leaf (leaf &optional ignore-first-line)
+  (let ((str (serialize-leaf leaf)))
+    (ironclad:digest-sequence
+     :sha256
+					; TODO handle non-ASCII text
+     (ironclad:ascii-string-to-byte-array str)
+     :start (if ignore-first-line (get-position-of-second-line str) 0))))
