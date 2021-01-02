@@ -18,6 +18,9 @@
 (defparameter upstream+ "http://localhost:4242/")
 (defparameter test-repo+ "~/lisp/commonplace/test-repo")
 (defparameter user+ "Me")
+(defparameter private-key-file+ "~/.ssh/id_rsa")
+(defparameter public-key-file+ "~/.ssh/id_rsa.pub")
+(defparameter private-key-passphrase+ nil)
 
 (defvar acceptor* nil)
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
@@ -661,44 +664,67 @@ found"
 	(logior (ash (logand b 15) 4) (ash (logand c 60) -2))
 	(logior (ash (logand c 3) 6) d)))
 
-(defun encode-chars (&rest chars)
-  (mapcar #'encode-sextet (apply #'compute-sextets (mapcar #'safe-char-code chars))))
+(defun encode-chars (&rest octets)
+  (mapcar #'encode-sextet (apply #'compute-sextets octets)))
 
 (defun decode-chars (&rest chars)
   (let ((codes (apply #'compute-octets (mapcar #'decode-char chars))))
     (do ((c (car (last codes)) (car (last codes))))
 	((not (zerop c)))
       (setf codes (butlast codes)))
-    (mapcar #'code-char codes)))
+    codes))
 
 (defun safe-char-code (c) (if c (char-code c)))
 
-(defun base64-encode-stream (s)
-  (apply #'append (loop
-		     for a = (read-char s nil nil)
-		     for b = (read-char s nil nil)
-		     for c = (read-char s nil nil)
-		     while a
-		     collect (encode-chars a b c))))
+(defun base64-encode-octets (octets)
+  (let ((arr (make-fillable-string))
+	(pos 0))
+    (labels ((pull () (if (>= pos (length octets)) nil (prog1 (aref octets pos) (incf pos)))))
+      (loop
+	for a = (pull)
+	for b = (pull)
+	for c = (pull)
+	while a
+	do (dolist (x (encode-chars a b c)) (vector-push-extend x arr)))
+      arr)))
 
-(defun base64-decode-stream (s)
-  (apply #'append (loop
-		     for a = (read-char s nil nil)
-		     while a
-		     for b = (read-char s)
-		     for c = (read-char s)
-		     for d = (read-char s)
-		     collect (decode-chars a b c d))))
+(defun base64-decode-string (str)
+  (let ((arr (make-array '(0) :element-type '(unsigned-byte 8) :adjustable T :fill-pointer 0))
+	(pos 0))
+    (labels ((pull () (if (>= pos (length str)) nil (prog1 (aref str pos) (incf pos)))))
+      (loop
+	for a = (pull)
+	while a
+	for b = (pull)
+	for c = (pull)
+	for d = (pull)
+	do (dolist (x (decode-chars a b c d)) (vector-push-extend x arr)))
+      arr)))
 
 ;;;; Signatures
 
-(defun get-position-of-second-line (string)
-  (with-input-from-string (s string) (1+ (length (read-line s)))))
+(defun get-position-of-second-line (string) (1+ (position #\newline string)))
 
-(defun get-digest-for-leaf (leaf &optional ignore-first-line)
-  (let ((str (serialize-leaf leaf)))
-    (ironclad:digest-sequence
-     :sha256
+(defun get-digest-for-leaf (leaf-string &optional ignore-first-line)
+  (ironclad:digest-sequence
+   :sha256
 					; TODO handle non-ASCII text
-     (ironclad:ascii-string-to-byte-array str)
-     :start (if ignore-first-line (get-position-of-second-line str) 0))))
+   (ironclad:ascii-string-to-byte-array leaf-string)
+   :start (if ignore-first-line (get-position-of-second-line leaf-string) 0)))
+
+(defun encrypt-digest (digest &optional
+				(private-key-file private-key-file+)
+				(passphrase private-key-passphrase+))
+  (let ((key (ssh-keys:parse-private-key-file private-key-file :passphrase passphrase)))
+    (ironclad:sign-message key digest)))
+
+(defun calculate-signature (leaf-string)
+  (encrypt-digest (get-digest-for-leaf leaf-string T)))
+
+(defun create-signature-line (rest-of-leaf)
+  (base64-encode-octets (calculate-signature rest-of-leaf)))
+
+(defun verify-leaf-signature (leaf-string)
+  (let ((from-file (subseq leaf-string 0 (position #\newline leaf-string)))
+	(calculated (create-signature-line leaf-string)))
+    (equalp from-file calculated)))
