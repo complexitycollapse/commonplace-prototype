@@ -252,7 +252,7 @@ parts that do"
 (defun editable-p (leaf) (equal editable-signature+ (leaf-sig leaf)))
 
 (defun new-content-leaf (name text)
-  (make-content-leaf :name name :owner user+ :sig "SIG" :type "content"
+  (make-content-leaf :name name :owner user+ :sig "UNSET" :type "content"
 		     :contents text))
 
 (defun new-doc-leaf (name &optional spans links)
@@ -374,7 +374,9 @@ parts that do"
 	  (migrate-scroll-spans-to-leaf scroll-spans map (leaf-name new-leaf))))
     (save-leaf new-leaf)
     (save-leaf fully-migrated)
-    (save-leaf (new-doc-leaf local-scroll-name+ migrated-scroll-spans nil))))
+    (let ((new-doc-leaf (new-doc-leaf local-scroll-name+ migrated-scroll-spans nil)))
+      (setf (leaf-sig new-doc-leaf) nil)
+      (save-leaf new-doc-leaf))))
 
 ;;;; Ugly file processing stuff
 ;;;; (get rid of this and do it properly!)
@@ -412,8 +414,8 @@ parts that do"
   (save-leaf (make-content-leaf :name scratch-name+ :owner user+ :sig editable-signature+
 				:type "scratch")))
 
-(defun load-and-parse (name)
-  (parse-vector (load-by-name name)))
+(defun load-and-parse (name &optional allow-invalid-signature)
+  (parse-vector (load-by-name name) allow-invalid-signature))
 
 (defun save-leaf (leaf)
   (save-by-name (leaf-name leaf) (serialize-leaf leaf)))
@@ -434,7 +436,7 @@ parts that do"
 
 ;;;; Parsing leaves
 
-(defun parse-vector (v)
+(defun parse-vector (v &optional allow-invalid-signature)
   (with-input-from-string (s v)
     (let* ((sig (read-line s))
 	   (type (read-line s))
@@ -444,19 +446,25 @@ parts that do"
 	   (contents (make-fillable-string)))
       (assert (string= content-separator "-"))
       (drain s (lambda (c) (vector-push-extend c contents)))
-      (if (or (string= type "doc") (string= type "scroll") (string= type "local-scroll"))
-	  (let ((spans-links (parse-doc-contents contents)))
-	    (make-doc :sig sig
-		      :name name
-		      :owner owner
-		      :type type
-		      :spans (first spans-links)
-		      :links (second spans-links)))
-	  (make-content-leaf :sig sig
-			     :name name
-		             :owner owner
-			     :type type
-			     :contents contents)))))
+      (let ((leaf
+	      (if (or (string= type "doc")
+		      (string= type "scroll")
+		      (string= type "local-scroll"))
+		  (let* ((spans-links (parse-doc-contents contents)))
+		    (make-doc :sig sig
+			      :name name
+			      :owner owner
+			      :type type
+			      :spans (first spans-links)
+			      :links (second spans-links)))
+		  (make-content-leaf :sig sig
+				     :name name
+				     :owner owner
+				     :type type
+				     :contents contents))))
+	(if (not (or allow-invalid-signature (editable-p leaf) (verify-leaf-signature v)))
+	    (error "Invalid signature for ~A" (leaf-name leaf)))
+	leaf))))
 
 (defun parse-name (name-string type)
   (let ((real-type (if (stringp type) (intern (string-upcase type) (symbol-package :foo))
@@ -525,6 +533,11 @@ parts that do"
 ;;;; Serializing leaves
 
 (defun serialize-leaf (leaf)
+  (let* ((signed-part (serialize-signed-part leaf))
+	 (sig (if (editable-p leaf) (leaf-sig leaf) (create-signature-line signed-part))))
+    (concatenate 'string sig (format nil "~%") signed-part)))
+
+(defun serialize-signed-part (leaf)
   (concatenate 'string (serialize-leaf-header leaf)
 	       (if (doc-p leaf) (serialize-doc-contents leaf) (content-leaf-contents leaf))))
 
@@ -536,7 +549,6 @@ parts that do"
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
     (labels ((p (str) (format s "~A~%" str)))
-      (p (leaf-sig leaf))
       (p (leaf-type leaf))
       (p (serialize-name (leaf-name leaf)))
       (p (leaf-owner leaf))
@@ -703,14 +715,11 @@ found"
 
 ;;;; Signatures
 
-(defun get-position-of-second-line (string) (1+ (position #\newline string)))
-
-(defun get-digest-for-leaf (leaf-string &optional ignore-first-line)
+(defun get-digest-for-leaf (rest-of-leaf)
   (ironclad:digest-sequence
    :sha256
 					; TODO handle non-ASCII text
-   (ironclad:ascii-string-to-byte-array leaf-string)
-   :start (if ignore-first-line (get-position-of-second-line leaf-string) 0)))
+   (ironclad:ascii-string-to-byte-array rest-of-leaf)))
 
 (defun encrypt-digest (digest &optional
 				(private-key-file private-key-file+)
@@ -718,13 +727,14 @@ found"
   (let ((key (ssh-keys:parse-private-key-file private-key-file :passphrase passphrase)))
     (ironclad:sign-message key digest)))
 
-(defun calculate-signature (leaf-string)
-  (encrypt-digest (get-digest-for-leaf leaf-string T)))
+(defun calculate-signature (rest-of-leaf)
+  (encrypt-digest (get-digest-for-leaf rest-of-leaf)))
 
 (defun create-signature-line (rest-of-leaf)
   (base64-encode-octets (calculate-signature rest-of-leaf)))
 
 (defun verify-leaf-signature (leaf-string)
-  (let ((from-file (subseq leaf-string 0 (position #\newline leaf-string)))
-	(calculated (create-signature-line leaf-string)))
-    (equalp from-file calculated)))
+  (let* ((first-line-end (position #\newline leaf-string))
+	 (from-file (subseq leaf-string 0 first-line-end))
+	 (calculated (create-signature-line (subseq leaf-string (1+ first-line-end)))))
+    (equal from-file calculated)))
