@@ -24,7 +24,8 @@
   (modify-spans destination-name
 		(lambda (target-spans)
 		  (let ((source (safe-load-doc source-name)))
-		    (transclude (doc-spans source) start length target-spans insert-point)))))
+		    (transclude-spans
+		     (doc-spans source) start length target-spans insert-point)))))
 
 (defun new-version (existing-name &optional new-name)
   (let* ((actual-name
@@ -44,8 +45,9 @@
     exists))
 
 (defun import-file (new-leaf-name path &optional doc-to-add-to insert-point start length)
-  (save-leaf (create-content-from-file (ensure-parsed new-leaf-name "content") path))
-  (if doc-to-add-to (include-from-leaf doc-to-add-to insert-point new-leaf-name start length)))
+  (let ((new-leaf (save-leaf (create-content-from-file new-leaf-name path))))
+    (if doc-to-add-to
+	(include-from-leaf doc-to-add-to insert-point (leaf-name new-leaf) start length))))
 
 (defun include-from-leaf (doc-name insert-point leaf-name start length)
   (modify-spans doc-name
@@ -79,5 +81,5 @@
 
 (defun leaf-exists (name) (not (leaf-missing (ensure-parsed name))))
 
-(defun ensure-parsed (name &optional (type "doc"))
-  (if (stringp name) (parse-name name type) name))
+(defun ensure-parsed (name)
+  (if (stringp name) (parse-name name) name))

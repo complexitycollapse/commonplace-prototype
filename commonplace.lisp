@@ -3,7 +3,11 @@
 (in-package #:commonplace)
 
 (defstruct (span :conc-name) origin start len)
-(defstruct name type parts)
+(defstruct name)
+(defstruct (tumbler-name (:include name)) parts)
+(defstruct (hash-name (:include name)) hash)
+(defstruct (scroll-name (:include name)) scroll)
+(defstruct (scratch-name (:include name)))
 (defstruct leaf name owner type sig)
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) spans links)
@@ -12,8 +16,8 @@
 (defstruct (span-endset (:include endset)) spans)
 (defstruct (doc-endset (:include endset)) doc-name)
 
-(defparameter local-scroll-name+ (make-name :type :local-scroll :parts "local"))
-(defparameter scratch-name+ (make-name :type :scratch :parts '(0)))
+(defparameter local-scroll-name+ (make-scroll-name :scroll "local"))
+(defparameter scratch-name+ (make-scratch-name))
 (defparameter editable-signature+ "EDITABLE")
 (defparameter upstream+ "http://localhost:4242/")
 (defparameter test-repo+ "~/lisp/commonplace/test-repo")
@@ -165,7 +169,7 @@
   (let ((div (divide-twice spans start length)))
     (insert-spans (merge-span-lists (first div) (third div)) (second div) new-pos)))
 
-(defun transclude (source-spans start length target-spans insert-point)
+(defun transclude-spans (source-spans start length target-spans insert-point)
   "Transclude content from one set of spans into another."
   (insert-spans target-spans (extract-range source-spans start length) insert-point))
 
@@ -202,18 +206,41 @@ parts that do"
 
 ;;;; Leaf names
 
-(defun scroll-name-p (name) (or (eq (name-type name) :scroll) (local-scroll-name-p name)))
-(defun doc-name-p (name) (eq (name-type name) :doc))
-(defun content-name-p (name) (eq (name-type name) :content))
-(defun link-name-p (name) (eq (name-type name) :link))
-(defun local-scroll-name-p (name) (eq (name-type name) :local-scroll))
-(defun scratch-name-p (name) (eq (name-type name) :scratch))
+(defmethod get-path-extensions ((name tumbler-name))
+  (list "public/" (format nil "~{~A~^_~}" (tumbler-name-parts name))))
+
+(defmethod get-path-extensions ((name scroll-name))
+  (list "scrolls/" (scroll-name-scroll name)))
+
+(defmethod get-path-extensions ((name scratch-name)) (list "0"))
+
+(defmethod init-name-from-string ((name tumbler-name) str)
+  (setf (tumbler-name-parts name) (mapcar #'parse-integer (split-sequence #\. str))))
+
+(defmethod init-name-from-string ((name scroll-name) str)
+  (setf (scroll-name-scroll name) (subseq str 7)))
+
+(defmethod init-name-from-string ((name scratch-name) str))
+
+(defmethod init-name-from-string ((name hash-name) str)
+  (setf (hash-name-hash name) str))
+
+(defmethod serialize-name ((name scroll-name))
+  (format nil "scroll/~A" (scroll-name-scroll name)))
+
+(defmethod serialize-name ((name tumbler-name))
+  (format nil "~{~A~^.~}" (tumbler-name-parts name)))
+
+(defmethod serialize-name ((name hash-name)) (hash-name-hash name))
+
+(defmethod serialize-name ((name scratch-name)) "0")
+
+(defun local-scroll-name-p (name) (and (scroll-name-p name)
+				       (string= "local" (scroll-name-scroll name))))
 
 (defun get-next-version-name (old-name)
-  (if (doc-name-p old-name)
-      (let ((parts (name-parts old-name)))
-	(make-name :type :doc :parts (nconc (butlast parts) (list (1+ (car (last parts)))))))
-      (error "Can only get next version for a doc name")))
+  (let ((parts (tumbler-name-parts old-name)))
+    (make-tumbler-name :parts (nconc (butlast parts) (list (1+ (car (last parts))))))))
 
 ;;;; Leaf operations
 
@@ -397,14 +424,7 @@ parts that do"
 (defun repo-path () (cl-fad:pathname-as-directory repo-path*))
 
 (defun name-to-path (name)
-  (let* ((parts (name-parts name))
-	 (sub (ecase (name-type name)
-		((:scroll :local-scroll) (list "scrolls/" parts))
-		(:doc (list "public/" (format nil "~{~A~^_~}" parts)))
-		(:content (list "public/" (format nil "~{~A~^_~}" parts)))
-		(:scratch (list (format nil "~{~A~^_~}" parts)))
-		(:link (list "public/" (format nil "~{~A~^_~}" parts))))))
-    (apply #'cl-fad:merge-pathnames-as-file (repo-path) sub)))
+  (apply #'cl-fad:merge-pathnames-as-file (repo-path) (get-path-extensions name)))
 
 (defun init ()
   (ensure-directories-exist (cl-fad:merge-pathnames-as-directory (repo-path) "public/"))
@@ -415,7 +435,7 @@ parts that do"
 				:type "scratch")))
 
 (defun load-and-parse (name &optional allow-invalid-signature)
-  (parse-vector (load-by-name name) allow-invalid-signature))
+  (parse-vector (load-by-name name) name allow-invalid-signature))
 
 (defun save-leaf (leaf)
   (save-by-name (leaf-name leaf) (serialize-leaf leaf)))
@@ -436,20 +456,19 @@ parts that do"
 
 ;;;; Parsing leaves
 
-(defun parse-vector (v &optional allow-invalid-signature)
+(defun parse-vector (v name &optional allow-invalid-signature)
+  (declare (ignore name))
   (with-input-from-string (s v)
     (let* ((sig (read-line s))
-	   (type (read-line s))
-	   (name (parse-name (read-line s) type))
+	   (type (parse-type (read-line s)))
+	   (name (parse-name (read-line s)))
 	   (owner (read-line s))
 	   (content-separator (read-line s))
 	   (contents (make-fillable-string)))
       (assert (string= content-separator "-"))
       (drain s (lambda (c) (vector-push-extend c contents)))
       (let ((leaf
-	      (if (or (string= type "doc")
-		      (string= type "scroll")
-		      (string= type "local-scroll"))
+	      (if (represents-doc-p type)
 		  (let* ((spans-links (parse-doc-contents contents)))
 		    (make-doc :sig sig
 			      :name name
@@ -466,16 +485,14 @@ parts that do"
 	    (error "Invalid signature for ~A" (leaf-name leaf)))
 	leaf))))
 
-(defun parse-name (name-string type)
-  (let ((real-type (if (stringp type) (intern (string-upcase type) (symbol-package :foo))
-		       type)))
-    (if (string= "0" name-string) scratch-name+
-	(make-name
-	 :type real-type
-	 :parts
-	 (cond
-	   ((string-starts-with "scroll/" name-string) (subseq name-string 7))
-	   (T (mapcar #'parse-integer (split-sequence #\. name-string))))))))
+(defun parse-type (type-string) (intern (string-upcase type-string) (symbol-package :x)))
+
+(defun represents-doc-p (type) (find type '(:doc :scroll :local-scroll)))
+
+(defun parse-name (str)
+  (cond ((string= "0" str) scratch-name+)
+	((string-starts-with "scroll/" str) (make-scroll-name :scroll (subseq str 7)))
+	(T (make-tumbler-name :parts (mapcar #'parse-integer (split-sequence #\. str))))))
 
 (defun parse-doc-contents (contents)
   "Parses the contents part of a leaf as if it were a document, returning (list spans links)."
@@ -504,7 +521,8 @@ parts that do"
     (assert (= (length parts) 3))
     (assert (string-starts-with "start=" (second parts)))
     (assert (string-starts-with "length=" (third parts)))
-    (span (parse-name (first parts) :content)
+					; TODO change this to a hash name
+    (span (parse-name (first parts))
 	   (read-from-string (subseq (second parts) 6))
 	  (read-from-string (subseq (third parts) 7)))))
 
@@ -528,7 +546,7 @@ parts that do"
     (mapcar #'parse-span-section nested-spans)))
 
 (defun parse-doc-ref (doc)
-  (parse-name (subseq doc 4) :doc))
+  (parse-name (subseq doc 4)))
 
 ;;;; Serializing leaves
 
@@ -541,15 +559,10 @@ parts that do"
   (concatenate 'string (serialize-leaf-header leaf)
 	       (if (doc-p leaf) (serialize-doc-contents leaf) (content-leaf-contents leaf))))
 
-(defun serialize-name (name)
-  (if (scroll-name-p name)
-      (format nil "scroll/~A" (name-parts name))
-      (format nil "~{~A~^.~}" (name-parts name))))
-
 (defun serialize-leaf-header (leaf)
   (with-output-to-string (s)
     (labels ((p (str) (format s "~A~%" str)))
-      (p (leaf-type leaf))
+      (p (string-downcase (symbol-name (leaf-type leaf))))
       (p (serialize-name (leaf-name leaf)))
       (p (leaf-owner leaf))
       (p "-"))))
@@ -593,7 +606,7 @@ parts that do"
 (defun init-acceptor ()  (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
     (setf (hunchentoot:content-type*) "text/plain") ; how should this be handled?
 					; TODO Cannot assume :CONTENT below
-    (let ((leaf (load-by-name (parse-name name :content))))
+    (let ((leaf (load-by-name (parse-name name))))
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
       leaf)))
 
@@ -632,7 +645,7 @@ found"
   (with-http-client
     (let ((doc (ensure-leaf doc-name T force-download)))
       (when doc
-	(ensure-leaves (mapcar #'origin (doc-spans (parse-vector doc)))
+	(ensure-leaves (mapcar #'origin (doc-spans (parse-vector doc doc-name)))
 		       force-download)))))
 
 (defun get-leaf-from-server (name keep-alive)
