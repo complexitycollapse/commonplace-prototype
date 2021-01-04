@@ -25,6 +25,7 @@
 (defparameter private-key-file+ "~/.ssh/id_rsa")
 (defparameter public-key-file+ "~/.ssh/id_rsa.pub")
 (defparameter private-key-passphrase+ nil)
+(defparameter default-hash-length+ 6)
 
 (defvar acceptor* nil)
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
@@ -728,11 +729,9 @@ found"
 
 ;;;; Signatures
 
-(defun get-digest-for-leaf (rest-of-leaf)
-  (ironclad:digest-sequence
-   :sha256
+(defun get-digest-for-string (str)
 					; TODO handle non-ASCII text
-   (ironclad:ascii-string-to-byte-array rest-of-leaf)))
+  (ironclad:digest-sequence :sha256 (ironclad:ascii-string-to-byte-array str)))
 
 (defun encrypt-digest (digest &optional
 				(private-key-file private-key-file+)
@@ -740,8 +739,8 @@ found"
   (let ((key (ssh-keys:parse-private-key-file private-key-file :passphrase passphrase)))
     (ironclad:sign-message key digest)))
 
-(defun calculate-signature (rest-of-leaf)
-  (encrypt-digest (get-digest-for-leaf rest-of-leaf)))
+(defun calculate-signature (str)
+  (encrypt-digest (get-digest-for-string str)))
 
 (defun create-signature-line (rest-of-leaf)
   (base64-encode-octets (calculate-signature rest-of-leaf)))
@@ -751,3 +750,6 @@ found"
 	 (from-file (subseq leaf-string 0 first-line-end))
 	 (calculated (create-signature-line (subseq leaf-string (1+ first-line-end)))))
     (equal from-file calculated)))
+
+(defun create-hash-name (leaf-string &optional (length default-hash-length+))
+  (subseq (ironclad:byte-array-to-hex-string (get-digest-for-string leaf-string)) 0 length))
