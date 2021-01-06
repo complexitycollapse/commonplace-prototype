@@ -5,7 +5,8 @@
 (defun new-doc () (leaf-name (save-leaf (new-doc-leaf))))
 
 (defun append-text (name text)
-  (modify-spans name (lambda (spans) (pushend (append-to-local-scroll text) spans) spans)))
+  (modify-spans name (lambda (spans)
+		       (merge-span-lists spans (list (append-to-local-scroll text))))))
 
 (defun insert-text (name point text)
   (modify-spans name (lambda (spans)
@@ -25,22 +26,19 @@
 		     (doc-spans source) start length target-spans insert-point)))))
 
 (defun new-version (existing-name)
-  (save-leaf (make-new-version (ensure-parsed existing-name))))
+  (leaf-name (save-leaf (make-new-version (safe-load-doc existing-name)))))
 
 (defun delete-leaf (name)
   (let ((exists (leaf-exists name)))
     (if exists (delete-file (name-to-path (ensure-parsed name))))
     exists))
 
-(defun import-file (path &optional doc-to-add-to insert-point start length)
+(defun import-file (path)
   (let ((new-leaf (save-leaf (create-content-from-file path))))
-    (if doc-to-add-to
-	(include-from-leaf doc-to-add-to insert-point (leaf-name new-leaf) start length))))
-
-(defun include-from-leaf (doc-name insert-point leaf-name start length)
-  (modify-spans doc-name
-		(lambda (spans)
-		  (insert-spans spans (list (span leaf-name start length)) insert-point))))
+    (leaf-name
+     (save-leaf (new-doc-leaf (list (span (leaf-name new-leaf)
+					  0
+					  (length (content-leaf-contents new-leaf)))))))))
 
 (defun export-text (name output-filename)
   (let ((doc (safe-load-doc name)))
@@ -65,7 +63,7 @@
   (let ((doc (safe-load-doc name)))
     (if (not (editable-p doc)) (error "Document ~A is immutable." (serialize-name name)))
     (setf (doc-spans doc) (funcall fn (doc-spans doc)))
-    (save-leaf doc)))
+    (leaf-name (save-leaf doc))))
 
 (defun leaf-exists (name) (not (leaf-missing (ensure-parsed name))))
 

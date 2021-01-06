@@ -81,7 +81,7 @@
 
 (defun span-end (s) (1- (next-pos s)))
 
-(defun same-origin (s1 s2) (equal (origin s1) (origin s2)))
+(defun same-origin (s1 s2) (equalp (origin s1) (origin s2)))
 
 (defun span-contains (span point &optional (adjustment 0))
   (let ((offset (- point (start span) adjustment)))
@@ -120,8 +120,11 @@
 	    (edit-span s :start (+ (start s) length) :len (- (len s) length)))))
 
 (defun merge-span-lists (list1 list2)
-  (let ((lifted (lift list1)))
-    (append (cdr lifted) (merge-spans (car lifted) (car list2)) (cdr list2))))
+  (cond
+    ((endp list1) list2)
+    ((endp list2) list1)
+    (T (let ((lifted (lift list1)))
+	 (append (cdr lifted) (merge-spans (car lifted) (car list2)) (cdr list2))))))
 
 (defun merge-all (list)
   "Merge all spans that abut or overlap"
