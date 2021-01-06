@@ -1,4 +1,4 @@
-* TODO Calculate signatures
+* DONE Calculate signatures
 * TODO CLI
 * DONE Move scratch out of "public"
 * TODO Figure out how to handle different types of data

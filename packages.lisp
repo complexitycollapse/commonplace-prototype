@@ -6,7 +6,8 @@
    :leaf-missing :save-leaf :new-doc-leaf :pushend :append-to-local-scroll :insert-spans
    :doc-spans :load-and-parse :delete-spans :move-spans :editable-p :serialize-name
    :parse-name :transclude-spans :get-next-version-name :name-to-path :create-content-from-file
-   :new-content-leaf :generate-concatatext :download-folio :len :span :leaf-name))
+   :new-content-leaf :generate-concatatext :download-folio :len :span :leaf-name
+   :make-new-version))
 
 (defpackage #:cp-api
   (:use #:commonplace #:cl)

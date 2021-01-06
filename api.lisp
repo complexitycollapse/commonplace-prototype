@@ -2,10 +2,7 @@
 
 (in-package #:cp-api)
 
-(defun new-doc (name)
-  (setf name (ensure-parsed name))
-  (if (leaf-exists name) (error "There already exists a leaf called ~A" (serialize-name name)))
-  (save-leaf (new-doc-leaf name)))
+(defun new-doc () (leaf-name (save-leaf (new-doc-leaf))))
 
 (defun append-text (name text)
   (modify-spans name (lambda (spans) (pushend (append-to-local-scroll text) spans) spans)))
@@ -27,25 +24,16 @@
 		    (transclude-spans
 		     (doc-spans source) start length target-spans insert-point)))))
 
-(defun new-version (existing-name &optional new-name)
-  (let* ((actual-name
-	  (ensure-parsed (or new-name (get-next-version-name (ensure-parsed existing-name)))))
-	 (already-exists (leaf-exists actual-name)))
-    (if (and (not new-name) already-exists)
-	(error "Leaf ~A already exists. Please specify a name for the new version explicitly."
-	       (serialize-name actual-name)))
-    (if already-exists (error "Leaf with name ~A already exists." (serialize-name actual-name)))
-    (save-leaf (new-version (ensure-parsed existing-name) actual-name))))
+(defun new-version (existing-name)
+  (save-leaf (make-new-version (ensure-parsed existing-name))))
 
 (defun delete-leaf (name)
-  (let ((exists (leaf-exists name))) ; TODO similar problem to below
+  (let ((exists (leaf-exists name)))
     (if exists (delete-file (name-to-path (ensure-parsed name))))
-					; TODO This cannot delete non-doc leaves
-					; due to ENSURE-PARSED implementation. Fix that.
     exists))
 
-(defun import-file (new-leaf-name path &optional doc-to-add-to insert-point start length)
-  (let ((new-leaf (save-leaf (create-content-from-file new-leaf-name path))))
+(defun import-file (path &optional doc-to-add-to insert-point start length)
+  (let ((new-leaf (save-leaf (create-content-from-file path))))
     (if doc-to-add-to
 	(include-from-leaf doc-to-add-to insert-point (leaf-name new-leaf) start length))))
 
@@ -81,5 +69,4 @@
 
 (defun leaf-exists (name) (not (leaf-missing (ensure-parsed name))))
 
-(defun ensure-parsed (name)
-  (if (stringp name) (parse-name name) name))
+(defun ensure-parsed (name) (if (stringp name) (parse-name name) name))

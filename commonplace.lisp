@@ -215,6 +215,9 @@ parts that do"
 
 (defmethod get-path-extensions ((name scratch-name)) (list "0"))
 
+(defmethod get-path-extensions ((name hash-name))
+  (list "public/" (hash-name-hash name)))
+
 (defmethod init-name-from-string ((name tumbler-name) str)
   (setf (tumbler-name-parts name) (mapcar #'parse-integer (split-sequence #\. str))))
 
@@ -238,6 +241,9 @@ parts that do"
 
 (defun local-scroll-name-p (name) (and (scroll-name-p name)
 				       (string= "local" (scroll-name-scroll name))))
+
+(defun set-hash-name (leaf serialized-leaf)
+  (setf (leaf-name leaf) (make-hash-name :hash (create-hash serialized-leaf))))
 
 (defun get-next-version-name (old-name)
   (let ((parts (tumbler-name-parts old-name)))
@@ -275,27 +281,26 @@ parts that do"
 				  (link-endsets l))))
 	     (setf (link-endsets new) endsets)
 	     (links new)))))
-    (new-doc-leaf (doc-name doc) (flatten clips) links)))
+    (new-doc-leaf (flatten clips) links)))
 
 (defun editable-p (leaf) (equal editable-signature+ (leaf-sig leaf)))
 
-(defun new-content-leaf (name text)
-  (make-content-leaf :name name :owner user+ :sig "UNSET" :type "content"
-		     :contents text))
+(defun new-content-leaf (text)
+  (make-content-leaf :owner user+ :sig "UNSET" :type :content :contents text))
 
-(defun new-doc-leaf (name &optional spans links)
-  (make-doc :name name :owner user+ :sig editable-signature+ :type "doc"
+(defun new-doc-leaf (&optional spans links)
+  (make-doc :owner user+ :sig editable-signature+ :type :doc
 	    :spans spans :links links))
 
-(defun new-version (doc &optional (new-name (get-next-version-name (leaf-name doc))))
-  (new-doc-leaf new-name (doc-spans doc) (doc-links doc)))
+(defun make-new-version (doc)
+  (new-doc-leaf (doc-spans doc) (doc-links doc)))
 
-(defun create-content-from-file (name path)
+(defun create-content-from-file (path)
   "Import text from a file"
   (let ((contents (make-fillable-string)))
     (with-open-file (s path)
       (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))
-    (new-content-leaf name contents)))
+    (new-content-leaf contents)))
 
 (defun load-all-contents (spans &optional (index (make-hash-table :test 'equal)))
   (dolist (a (mapcar #'origin spans))
@@ -364,8 +369,10 @@ parts that do"
 	  (collect it)
 	  (setf deduped (remove it deduped)))))))
 
-(defun create-leaf-from-map (map name)
-  (new-content-leaf name (generate-concatatext map)))
+(defun create-leaf-from-map (map)
+  (let ((leaf (new-content-leaf (generate-concatatext map))))
+    (set-hash-name leaf (serialize-leaf leaf))
+    leaf))
 
 (defun migrate-scratch-spans-to-leaf (doc map leaf-name)
   (replace-spans
@@ -391,19 +398,19 @@ parts that do"
   (mapcan (lambda (s) (rewrite-scratch-span s map 0 leaf-name)) scroll-spans))
 
 ;; TODO passing a name is a workaround until it is calculated
-(defun publish (doc leaf-name)
+(defun publish (doc)
   (let* ((scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
 	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc scroll-spans))
 	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch)))
-	 (new-leaf (create-leaf-from-map map leaf-name))
+	 (new-leaf (create-leaf-from-map map))
 	 (fully-migrated
 	  (migrate-scratch-spans-to-leaf migrated-to-scratch map (leaf-name new-leaf)))
 	 (migrated-scroll-spans
 	  (migrate-scroll-spans-to-leaf scroll-spans map (leaf-name new-leaf))))
     (save-leaf new-leaf)
     (save-leaf fully-migrated)
-    (let ((new-doc-leaf (new-doc-leaf local-scroll-name+ migrated-scroll-spans nil)))
-      (setf (leaf-sig new-doc-leaf) nil)
+    (let ((new-doc-leaf (new-doc-leaf migrated-scroll-spans nil)))
+      (setf (leaf-sig new-doc-leaf) nil (leaf-name new-doc-leaf) local-scroll-name+)
       (save-leaf new-doc-leaf))))
 
 ;;;; Ugly file processing stuff
@@ -439,7 +446,10 @@ parts that do"
   (parse-vector (load-by-name name) name allow-invalid-signature))
 
 (defun save-leaf (leaf)
-  (save-by-name (leaf-name leaf) (serialize-leaf leaf)))
+  (let ((serialized (serialize-leaf leaf)))
+    (if (not (leaf-name leaf)) (set-hash-name leaf serialized))
+    (save-by-name (leaf-name leaf) serialized)
+    leaf))
 
 (defun load-by-name (name)
   (let ((file (make-fillable-string)))
@@ -458,11 +468,9 @@ parts that do"
 ;;;; Parsing leaves
 
 (defun parse-vector (v name &optional allow-invalid-signature)
-  (declare (ignore name))
   (with-input-from-string (s v)
     (let* ((sig (read-line s))
 	   (type (parse-type (read-line s)))
-	   (name (parse-name (read-line s)))
 	   (owner (read-line s))
 	   (content-separator (read-line s))
 	   (contents (make-fillable-string)))
@@ -493,7 +501,7 @@ parts that do"
 (defun parse-name (str)
   (cond ((string= "0" str) scratch-name+)
 	((string-starts-with "scroll/" str) (make-scroll-name :scroll (subseq str 7)))
-	(T (make-tumbler-name :parts (mapcar #'parse-integer (split-sequence #\. str))))))
+	(T (make-hash-name :hash str))))
 
 (defun parse-doc-contents (contents)
   "Parses the contents part of a leaf as if it were a document, returning (list spans links)."
@@ -522,9 +530,8 @@ parts that do"
     (assert (= (length parts) 3))
     (assert (string-starts-with "start=" (second parts)))
     (assert (string-starts-with "length=" (third parts)))
-					; TODO change this to a hash name
     (span (parse-name (first parts))
-	   (read-from-string (subseq (second parts) 6))
+	  (read-from-string (subseq (second parts) 6))
 	  (read-from-string (subseq (third parts) 7)))))
 
 (defun parse-link-include (link)
@@ -564,7 +571,6 @@ parts that do"
   (with-output-to-string (s)
     (labels ((p (str) (format s "~A~%" str)))
       (p (string-downcase (symbol-name (leaf-type leaf))))
-      (p (serialize-name (leaf-name leaf)))
       (p (leaf-owner leaf))
       (p "-"))))
 
@@ -751,5 +757,5 @@ found"
 	 (calculated (create-signature-line (subseq leaf-string (1+ first-line-end)))))
     (equal from-file calculated)))
 
-(defun create-hash-name (leaf-string &optional (length default-hash-length+))
+(defun create-hash (leaf-string &optional (length default-hash-length+))
   (subseq (ironclad:byte-array-to-hex-string (get-digest-for-string leaf-string)) 0 length))
