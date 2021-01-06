@@ -438,9 +438,9 @@ parts that do"
   (ensure-directories-exist (cl-fad:merge-pathnames-as-directory (repo-path) "public/"))
   (ensure-directories-exist (cl-fad:merge-pathnames-as-directory (repo-path) "scrolls/"))
   (save-leaf (make-doc :name local-scroll-name+ :owner user+ :sig editable-signature+
-		       :type "local-scroll"))
+		       :type :local-scroll))
   (save-leaf (make-content-leaf :name scratch-name+ :owner user+ :sig editable-signature+
-				:type "scratch")))
+				:type :scratch)))
 
 (defun load-and-parse (name &optional allow-invalid-signature)
   (parse-vector (load-by-name name) name allow-invalid-signature))
