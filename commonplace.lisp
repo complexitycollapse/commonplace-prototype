@@ -208,6 +208,31 @@ parts that do"
 (defun append-new-text (doc text)
   (pushend (append-to-local-scroll text) (doc-spans doc)))
 
+;;;; Document names
+
+(defun generate-doc-name-string ()
+  (ironclad:byte-array-to-hex-string (map-into (make-array '(3)) (lambda () (random 256)))))
+
+(defun get-doc-name-path (name) (repo-path (list "names/" name)))
+
+(defun new-doc-name (version-name)
+  (let ((name (generate-doc-name-string)))
+    (with-open-file (s (get-doc-name-path name)
+		       :direction :output :if-does-not-exist :create :if-exists :error)
+      (princ (hash-name-hash version-name) s))
+    name))
+
+(defun update-doc-name (name new-hash)
+  (with-open-file (s (get-doc-name-path name)
+		     :direction :output :if-does-not-exist :error :if-exists :overwrite)
+      (princ (hash-name-hash new-hash) s)))
+
+(defun resolve-doc-name (name)
+  (with-open-file (s (get-doc-name-path name) :if-does-not-exist :error)
+    (make-hash-name :hash (read-line s))))
+
+(defun delete-doc-name (name) (delete-file (get-doc-name-path name)))
+
 ;;;; Leaf names
 
 (defmethod get-path-extensions ((name tumbler-name))
@@ -432,14 +457,17 @@ parts that do"
 (defun set-test-repo ()
   (setf repo-path* test-repo+))
 
-(defun repo-path () (cl-fad:pathname-as-directory repo-path*))
+(defun repo-path (extensions)
+  (apply #'cl-fad:merge-pathnames-as-file
+	 (cl-fad:pathname-as-directory repo-path*)
+	 extensions))
 
-(defun name-to-path (name)
-  (apply #'cl-fad:merge-pathnames-as-file (repo-path) (get-path-extensions name)))
+(defun name-to-path (name) (repo-path (get-path-extensions name)))
 
 (defun init ()
-  (ensure-directories-exist (cl-fad:merge-pathnames-as-directory (repo-path) "public/"))
-  (ensure-directories-exist (cl-fad:merge-pathnames-as-directory (repo-path) "scrolls/"))
+  (ensure-directories-exist (repo-path "public/"))
+  (ensure-directories-exist (repo-path "scrolls/"))
+  (ensure-directories-exist (repo-path "names/"))
   (save-leaf (make-doc :name local-scroll-name+ :owner user+ :sig editable-signature+
 		       :type :local-scroll))
   (save-leaf (make-content-leaf :name scratch-name+ :owner user+ :sig editable-signature+
@@ -449,8 +477,9 @@ parts that do"
   (parse-vector (load-by-name name) name allow-invalid-signature))
 
 (defun save-leaf (leaf)
-  (let ((serialized (serialize-leaf leaf)))
-    (if (not (leaf-name leaf)) (set-hash-name leaf serialized))
+  (let ((serialized (serialize-leaf leaf))
+	(name (leaf-name leaf)))
+    (if (or (not name) (hash-name-p name)) (set-hash-name leaf serialized))
     (save-by-name (leaf-name leaf) serialized)
     leaf))
 

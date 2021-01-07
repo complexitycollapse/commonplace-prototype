@@ -2,7 +2,7 @@
 
 (in-package #:cp-api)
 
-(defun new-doc () (leaf-name (save-leaf (new-doc-leaf))))
+(defun new-doc () (new-doc-name (leaf-name (save-leaf (new-doc-leaf)))))
 
 (defun append-text (name text)
   (modify-spans name (lambda (spans)
@@ -25,46 +25,39 @@
 		    (transclude-spans
 		     (doc-spans source) start length target-spans insert-point)))))
 
-(defun new-version (existing-name)
-  (leaf-name (save-leaf (make-new-version (safe-load-doc existing-name)))))
-
 (defun delete-leaf (name)
   (let ((exists (leaf-exists name)))
-    (if exists (delete-file (name-to-path (ensure-parsed name))))
+    (when exists
+      (delete-file (name-to-path (resolve-doc-name name)))
+      (delete-doc-name name))
     exists))
 
 (defun import-file (path)
   (let ((new-leaf (save-leaf (create-content-from-file path))))
-    (leaf-name
-     (save-leaf (new-doc-leaf (list (span (leaf-name new-leaf)
-					  0
-					  (length (content-leaf-contents new-leaf)))))))))
+    (new-doc-name
+     (leaf-name
+      (save-leaf (new-doc-leaf (list (span (leaf-name new-leaf)
+					   0
+					   (length (content-leaf-contents new-leaf))))))))))
 
 (defun export-text (name output-filename)
   (let ((doc (safe-load-doc name)))
       (with-open-file (s output-filename :direction :output :if-exists :supersede)
 	(princ (generate-concatatext (doc-spans doc)) s))))
 
-(defun fetch-doc (name)
-  (let ((missing (download-folio (ensure-parsed name))))
-    (if missing (warn "The following leaves could not be located: ~A"
-		      (mapcar #'serialize-name missing)))))
-
 (defun doc-length (name)
   (reduce #'+ (doc-spans (safe-load-doc name)) :key #'len))
 
 (defun safe-load-doc (name)
-  (setf name (ensure-parsed name))
-  (if (leaf-missing name) (error "No leaf has the name ~A" (serialize-name name)))
-  (load-and-parse name))
+  (let ((hash (if (hash-name-p name) name (resolve-doc-name name))))
+    (if (leaf-missing hash) (error "No leaf has the name ~A" name))
+    (load-and-parse hash)))
 
 (defun modify-spans (name fn)
-  (setf name (ensure-parsed name))
-  (let ((doc (safe-load-doc name)))
-    (if (not (editable-p doc)) (error "Document ~A is immutable." (serialize-name name)))
+  (let* ((hash (resolve-doc-name name))
+	 (doc (safe-load-doc hash)))
+    (if (not (editable-p doc)) (error "Document ~A is immutable." (serialize-name hash)))
     (setf (doc-spans doc) (funcall fn (doc-spans doc)))
-    (leaf-name (save-leaf doc))))
+    (update-doc-name name (leaf-name (save-leaf doc)))))
 
-(defun leaf-exists (name) (not (leaf-missing (ensure-parsed name))))
-
-(defun ensure-parsed (name) (if (stringp name) (parse-name name) name))
+(defun leaf-exists (name) (not (leaf-missing (resolve-doc-name name))))
