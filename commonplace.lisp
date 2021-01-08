@@ -429,7 +429,6 @@ parts that do"
 (defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
   (mapcan (lambda (s) (rewrite-scratch-span s map 0 leaf-name)) scroll-spans))
 
-;; TODO passing a name is a workaround until it is calculated
 (defun publish (doc)
   (let* ((scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
 	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc scroll-spans))
