@@ -6,6 +6,6 @@
 * DONE Rename to Commonplace
 * DONE Bug: appending to scroll does not merge spans
 * TODO Bounds checking (e.g. trying to edit beyond the end of a doc)
-* TODO Move links to their own files
+* DONE Move links to their own files
 * TODO API for links
 * TODO Base64 encoding doesn't work for UTF-8. Need to convert to binary properly
