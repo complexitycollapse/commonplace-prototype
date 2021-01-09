@@ -70,6 +70,9 @@
 (defmacro pushend (x place)
   `(if ,place (setf (cdr (last ,place)) (list ,x)) (setf ,place (list ,x))))
 
+(defun insert-at (x list n)
+  (if (zerop n) (cons x list) (cons (car list) (insert-at x (cdr list) (1- n)))))
+
 ;;; Span operations
 
 (defun span (origin start length) (make-span :origin origin :start start :len length))
@@ -321,8 +324,7 @@ parts that do"
   (make-content-leaf :owner user+ :sig "UNSET" :contents text))
 
 (defun new-doc-leaf (&optional spans links)
-  (make-doc :owner user+ :sig editable-signature+ :type :doc
-	    :spans spans :links links))
+  (make-doc :owner user+ :type :doc :spans spans :links links))
 
 (defun make-new-version (doc)
   (new-doc-leaf (doc-spans doc) (doc-links doc)))
@@ -357,6 +359,18 @@ parts that do"
     (if (scroll-name-p (origin span))
 	(generate-concatatext-clip (doc-spans contents) (start span) (len span) contents-hash)
 	(subseq (content-leaf-contents contents) (start span) (next-pos span)))))
+
+;;;; Links
+
+(defun link (type &rest endsets) (make-link :owner user+ :type type :endsets endsets))
+(defun doc-endset (name doc)
+  (make-doc-endset :name name :doc-name (if (doc-p doc) (doc-name doc) doc)))
+(defun span-endset (name &rest spans) (make-span-endset :name name :spans spans))
+
+(defun add-link (doc link) (pushend link (doc-links doc)))
+(defun insert-link (doc link n) (setf (doc-links doc) (insert-at link (doc-links doc) n)))
+(defun remove-link (doc link)
+  (setf (doc-links doc) (remove link (doc-links doc) :test #'equalp)))
 
 ;;;; Scrolls and publishing
 
@@ -603,7 +617,8 @@ parts that do"
 
 (defun serialize-leaf (leaf)
   (let* ((signed-part (serialize-signed-part leaf))
-	 (sig (if (editable-p leaf) (leaf-sig leaf) (create-signature-line signed-part))))
+	 (sig (if (editable-p leaf) (leaf-sig leaf)
+		  (setf (leaf-sig leaf) (create-signature-line signed-part)))))
     (concatenate 'string sig (format nil "~%") signed-part)))
 
 (defun serialize-signed-part (leaf)
