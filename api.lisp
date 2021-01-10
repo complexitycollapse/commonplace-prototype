@@ -56,7 +56,6 @@
 (defun modify-spans (name fn)
   (let* ((hash (resolve-doc-name name))
 	 (doc (safe-load-doc hash)))
-    (if (not (editable-p doc)) (error "Document ~A is immutable." (serialize-name hash)))
     (setf (doc-spans doc) (funcall fn (doc-spans doc)))
     (update-doc-name name (leaf-name (save-leaf doc)))))
 

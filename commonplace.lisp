@@ -18,7 +18,6 @@
 
 (defparameter local-scroll-name+ (make-scroll-name :scroll "local"))
 (defparameter scratch-name+ (make-scratch-name))
-(defparameter editable-signature+ "EDITABLE")
 (defparameter upstream+ "http://localhost:4242/")
 (defparameter test-repo+ "~/lisp/commonplace/test-repo")
 (defparameter user+ "Me")
@@ -216,7 +215,7 @@ parts that do"
 (defun generate-doc-name-string ()
   (ironclad:byte-array-to-hex-string (map-into (make-array '(3)) (lambda () (random 256)))))
 
-(defun get-doc-name-path (name) (repo-path (list "names/" name)))
+(defun get-doc-name-path (name) (repo-path "names/" name))
 
 (defun new-doc-name (version-name)
   (let ((name (generate-doc-name-string)))
@@ -318,10 +317,10 @@ parts that do"
 	     (links new)))))
     (new-doc-leaf (flatten clips) links)))
 
-(defun editable-p (leaf) (equal editable-signature+ (leaf-sig leaf)))
+(defun editable-p (leaf) (and (leaf-name leaf) (not (hash-name-p (leaf-name leaf)))))
 
 (defun new-content-leaf (text)
-  (make-content-leaf :owner user+ :sig "UNSET" :contents text))
+  (make-content-leaf :owner user+ :contents text))
 
 (defun new-doc-leaf (&optional spans links)
   (make-doc :owner user+ :type :doc :spans spans :links links))
@@ -454,9 +453,9 @@ parts that do"
 	  (migrate-scroll-spans-to-leaf scroll-spans map (leaf-name new-leaf))))
     (save-leaf new-leaf)
     (save-leaf fully-migrated)
-    (let ((new-doc-leaf (new-doc-leaf migrated-scroll-spans nil)))
-      (setf (leaf-sig new-doc-leaf) nil (leaf-name new-doc-leaf) local-scroll-name+)
-      (save-leaf new-doc-leaf))))
+    (let ((new-scroll (new-doc-leaf migrated-scroll-spans nil)))
+      (setf (leaf-name new-scroll) local-scroll-name+)
+      (save-leaf new-scroll))))
 
 ;;;; Ugly file processing stuff
 ;;;; (get rid of this and do it properly!)
@@ -474,20 +473,19 @@ parts that do"
 (defun set-test-repo ()
   (setf repo-path* test-repo+))
 
-(defun repo-path (extensions)
+(defun repo-path (&rest extensions)
   (apply #'cl-fad:merge-pathnames-as-file
 	 (cl-fad:pathname-as-directory repo-path*)
 	 extensions))
 
-(defun name-to-path (name) (repo-path (get-path-extensions name)))
+(defun name-to-path (name) (apply #'repo-path (get-path-extensions name)))
 
 (defun init ()
   (ensure-directories-exist (repo-path "public/"))
   (ensure-directories-exist (repo-path "scrolls/"))
   (ensure-directories-exist (repo-path "names/"))
-  (save-leaf (make-doc :name local-scroll-name+ :owner user+ :sig editable-signature+
-		       :type :local-scroll))
-  (save-leaf (make-content-leaf :name scratch-name+ :owner user+ :sig editable-signature+)))
+  (save-leaf (make-doc :name local-scroll-name+ :owner user+ :type :local-scroll))
+  (save-leaf (make-content-leaf :name scratch-name+ :owner user+)))
 
 (defun load-and-parse (name &optional allow-invalid-signature)
   (parse-vector (load-by-name name) name allow-invalid-signature))
@@ -617,7 +615,7 @@ parts that do"
 
 (defun serialize-leaf (leaf)
   (let* ((signed-part (serialize-signed-part leaf))
-	 (sig (if (editable-p leaf) (leaf-sig leaf)
+	 (sig (if (editable-p leaf) ""
 		  (setf (leaf-sig leaf) (create-signature-line signed-part)))))
     (concatenate 'string sig (format nil "~%") signed-part)))
 
