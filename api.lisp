@@ -1,7 +1,5 @@
 ;;;; api.lisp
 
-(in-package #:cp-api)
-
 (defun new-doc () (new-doc-name (leaf-name (save-leaf (new-doc-leaf)))))
 
 (defun append-text (name text)
