@@ -8,7 +8,7 @@
 (defstruct (hash-name (:include name)) hash)
 (defstruct (scroll-name (:include name)) scroll)
 (defstruct (scratch-name (:include name)))
-(defstruct leaf name owner sig)
+(defstruct leaf name owner)
 (defstruct (content-leaf (:include leaf)) contents)
 (defstruct (doc (:include leaf)) type spans links)
 (defstruct (link (:include leaf)) type endsets)
@@ -487,8 +487,8 @@ parts that do"
   (save-leaf (make-doc :name local-scroll-name+ :owner user+ :type :local-scroll))
   (save-leaf (make-content-leaf :name scratch-name+ :owner user+)))
 
-(defun load-and-parse (name &optional allow-invalid-signature)
-  (parse-vector (load-by-name name) name allow-invalid-signature))
+(defun load-and-parse (name)
+  (parse-vector (load-by-name name) name))
 
 (defun save-leaf (leaf)
   (let ((serialized (serialize-leaf leaf))
@@ -513,39 +513,31 @@ parts that do"
 
 ;;;; Parsing leaves
 
-(defun parse-vector (v name &optional allow-invalid-signature)
+(defun parse-vector (v name)
   (with-input-from-string (s v)
-    (let* ((sig (read-line s))
-	   (type (parse-type (read-line s)))
+    (let* ((type (parse-type (read-line s)))
 	   (owner (read-line s))
 	   (content-separator (read-line s))
 	   (contents (make-fillable-string)))
       (assert (string= content-separator "-"))
       (drain s (lambda (c) (vector-push-extend c contents)))
-      (let ((leaf
-	      (cond
-		((represents-doc-p type)
-		 (let* ((spans-links (parse-doc-contents contents)))
-		   (make-doc :sig sig
-			     :name name
-			     :owner owner
-			     :type type
-			     :spans (first spans-links)
-			     :links (second spans-links))))
-		((eq type :link)
-		 (let ((type-endsets (parse-link-contents contents)))
-		   (make-link :sig sig
-			      :name name
+      (cond
+	((represents-doc-p type)
+	 (let* ((spans-links (parse-doc-contents contents)))
+	   (make-doc :name name
+		     :owner owner
+		     :type type
+		     :spans (first spans-links)
+		     :links (second spans-links))))
+	((eq type :link)
+	 (let ((type-endsets (parse-link-contents contents)))
+	   (make-link :name name
+		      :owner owner
+		      :type (car type-endsets)
+		      :endsets (cdr type-endsets))))
+	(T (make-content-leaf :name name
 			      :owner owner
-			      :type (car type-endsets)
-			      :endsets (cdr type-endsets))))
-		(T (make-content-leaf :sig sig
-				      :name name
-				      :owner owner
-				      :contents contents)))))
-	(if (not (or allow-invalid-signature (editable-p leaf) (verify-leaf-signature v)))
-	    (error "Invalid signature for ~A" (leaf-name leaf)))
-	leaf))))
+			      :contents contents))))))
 
 (defun parse-type (type-string) (intern (string-upcase type-string) (symbol-package :x)))
 
@@ -614,12 +606,6 @@ parts that do"
 ;;;; Serializing leaves
 
 (defun serialize-leaf (leaf)
-  (let* ((signed-part (serialize-signed-part leaf))
-	 (sig (if (editable-p leaf) ""
-		  (setf (leaf-sig leaf) (create-signature-line signed-part)))))
-    (concatenate 'string sig (format nil "~%") signed-part)))
-
-(defun serialize-signed-part (leaf)
   (concatenate 'string (serialize-leaf-header leaf)
 	       (cond ((doc-p leaf) (serialize-doc-contents leaf))
 		     ((link-p leaf) (serialize-link-contents leaf))
