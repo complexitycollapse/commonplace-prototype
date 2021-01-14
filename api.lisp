@@ -1,5 +1,8 @@
 ;;;; api.lisp
 
+(defmacro with-safely-loaded-doc (name &body body)
+  `(f-with-safely-loaded-doc ,name (lambda (,(intern "DOC")) ,@body)))
+
 (defun new-doc () (new-doc-name (leaf-name (save-leaf (new-doc-leaf)))))
 
 (defun append-text (name text)
@@ -43,18 +46,23 @@
       (with-open-file (s output-filename :direction :output :if-exists :supersede)
 	(princ (generate-concatatext (doc-spans doc)) s))))
 
-(defun doc-length (name)
-  (reduce #'+ (doc-spans (safe-load-doc name)) :key #'len))
+(defun doc-length (name) (reduce #'+ (doc-spans (safe-load-doc name)) :key #'len))
+
+(defun add-link (doc-name link)
+  (with-safely-loaded-doc doc-name (add-link-to-end doc link)))
 
 (defun safe-load-doc (name)
   (let ((hash (if (hash-name-p name) name (resolve-doc-name name))))
     (if (leaf-missing hash) (error "No leaf has the name ~A" name))
     (load-and-parse hash)))
 
-(defun modify-spans (name fn)
-  (let* ((hash (resolve-doc-name name))
-	 (doc (safe-load-doc hash)))
-    (setf (doc-spans doc) (funcall fn (doc-spans doc)))
+(defun f-with-safely-loaded-doc (name fn)
+  (let* ((doc (safe-load-doc name)))
+    (funcall fn doc)
     (update-doc-name name (leaf-name (save-leaf doc)))))
+
+(defun modify-spans (name fn)
+  (with-safely-loaded-doc name
+    (setf (doc-spans doc) (funcall fn (doc-spans doc)))))
 
 (defun leaf-exists (name) (not (leaf-missing (resolve-doc-name name))))

@@ -335,7 +335,7 @@ parts that do"
       (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))
     (new-content-leaf contents)))
 
-(defun load-all-contents (spans &optional (index (make-hash-table :test 'equal)))
+(defun load-all-contents (spans &optional (index (make-hash-table :test 'equalp)))
   (dolist (a (mapcar #'origin spans))
     (when (not (nth-value 1 (gethash a index)))
       (setf (gethash a index) (load-and-parse a))
@@ -366,10 +366,20 @@ parts that do"
   (make-doc-endset :name name :doc-name (if (doc-p doc) (doc-name doc) doc)))
 (defun span-endset (name &rest spans) (make-span-endset :name name :spans spans))
 
-(defun add-link (doc link) (pushend link (doc-links doc)))
+(defun add-link-to-end (doc link) (pushend link (doc-links doc)))
 (defun insert-link (doc link n) (setf (doc-links doc) (insert-at link (doc-links doc) n)))
 (defun remove-link (doc link)
   (setf (doc-links doc) (remove link (doc-links doc) :test #'equalp)))
+
+(defun link-to-span-space (link)
+  (apply #'link (link-type link) (mapcar #'endset-to-span-space (link-endsets link))))
+
+(defun endset-to-span-space (endset)
+  (if (doc-endset-p endset) endset
+      (apply #'span-endset (span-endset-name endset)
+	     (merge-all (mapcar (lambda (s)
+				  (extract-range (doc-spans (origin s)) (start s) (len s)))
+				(span-endset-spans endset))))))
 
 ;;;; Scrolls and publishing
 
