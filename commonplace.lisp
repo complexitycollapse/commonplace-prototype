@@ -338,12 +338,12 @@ parts that do"
       (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))
     (new-content-leaf contents)))
 
-(defun load-all-contents (spans &optional (index (make-hash-table :test 'equalp)))
+(defun load-all-contents (spans &optional (cache (make-cache)))
   (dolist (a (mapcar #'origin spans))
-    (when (not (nth-value 1 (gethash a index)))
-      (setf (gethash a index) (load-and-parse a))
-      (if (scroll-name-p a) (load-all-contents (doc-spans (gethash a index)) index))))
-  index)
+    (when (not (in-cache a cache))
+      (let ((doc (get-from-cache a cache)))
+	(if (scroll-name-p a) (load-all-contents (doc-spans doc) cache)))))
+  cache)
 
 (defun generate-concatatext (spans &optional (contents-hash (load-all-contents spans)))
   (apply #'concatenate 'string
@@ -361,6 +361,17 @@ parts that do"
     (if (scroll-name-p (origin span))
 	(generate-concatatext-clip (doc-spans contents) (start span) (len span) contents-hash)
 	(subseq (content-leaf-contents contents) (start span) (next-pos span)))))
+
+(defun make-cache () (make-hash-table :test 'equalp))
+
+(defun in-cache (item cache) (nth-value 1 (gethash item cache)))
+
+(defun get-from-cache (item cache)
+  (let ((value (gethash item cache)))
+    (when (not (in-cache item cache))
+      (setf value (load-and-parse item))
+      (setf (gethash item cache) value))
+    value))
 
 ;;;; Links
 
