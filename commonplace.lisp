@@ -72,6 +72,9 @@
 (defun insert-at (x list n)
   (if (zerop n) (cons x list) (cons (car list) (insert-at x (cdr list) (1- n)))))
 
+(defun make-keyword (x)
+  (intern (string-upcase (with-output-to-string (s) (princ x s))) (symbol-package :x)))
+
 ;;; Span operations
 
 (defun span (origin start length) (make-span :origin origin :start start :len length))
@@ -549,7 +552,7 @@ parts that do"
 			      :owner owner
 			      :contents contents))))))
 
-(defun parse-type (type-string) (intern (string-upcase type-string) (symbol-package :x)))
+(defun parse-type (type-string) (make-keyword type-string))
 
 (defun represents-doc-p (type) (find type '(:doc :scroll :local-scroll)))
 
