@@ -385,6 +385,30 @@ parts that do"
 (defun remove-link (doc link)
   (setf (doc-links doc) (remove link (doc-links doc) :test #'equalp)))
 
+(defun create-link-from-spec (spec)
+  (labels ((do-endsets (spec &optional name)
+	     (let ((x (car spec)))
+	       (cond
+		 ((keywordp x)
+		  (if name (error "Endset ~S has not contents" name))
+		  (do-endsets (cdr spec) x))
+		 ((stringp x) (cons (doc-endset name x) (do-endsets (cdr spec))))
+		 ((consp x) (cons (apply #'span-endset name
+					 (if (consp (car x))
+					     (mapcar #'do-span x)
+					     (list (do-span x))))
+				  (do-endsets (cdr spec)))))))
+	   (do-span (list)
+	     (if (not (= 3 (length list)))
+		 (error "Span requires origin, start and length only: ~S" list))
+	     (if (not (integerp (second list)))
+		 (error "Start must be an integer: ~S" (second list)))
+	     (if (not (integerp (third list)))
+		 (error "Length must be an integer: ~S" (third list)))
+	     (apply #'span list)))
+    (if (link-p spec) spec
+	(apply #'link (make-keyword (car spec)) (do-endsets (cdr spec))))))
+
 (defun link-to-span-space (link)
   (apply #'link (link-type link) (mapcar #'endset-to-span-space (link-endsets link))))
 
