@@ -362,15 +362,17 @@ parts that do"
 	(generate-concatatext-clip (doc-spans contents) (start span) (len span) contents-hash)
 	(subseq (content-leaf-contents contents) (start span) (next-pos span)))))
 
+;;;; Leaf cache
+
 (defun make-cache () (make-hash-table :test 'equalp))
 
-(defun in-cache (item cache) (nth-value 1 (gethash item cache)))
+(defun in-cache (name cache) (nth-value 1 (gethash name cache)))
 
-(defun get-from-cache (item cache)
-  (let ((value (gethash item cache)))
-    (when (not (in-cache item cache))
-      (setf value (load-and-parse item))
-      (setf (gethash item cache) value))
+(defun get-from-cache (name cache)
+  (let ((value (gethash name cache)))
+    (when (not (in-cache name cache))
+      (setf value (load-and-parse name))
+      (setf (gethash name cache) value))
     value))
 
 ;;;; Links
@@ -407,17 +409,23 @@ parts that do"
 		 (error "Length must be an integer: ~S" (third list)))
 	     (apply #'span list)))
     (if (link-p spec) spec
-	(apply #'link (make-keyword (car spec)) (do-endsets (cdr spec))))))
+	(link-to-span-space
+	 (apply #'link (make-keyword (car spec)) (do-endsets (cdr spec)))))))
 
-(defun link-to-span-space (link)
-  (apply #'link (link-type link) (mapcar #'endset-to-span-space (link-endsets link))))
+(defun link-to-span-space (link &optional (cache (make-cache)))
+  (apply #'link (link-type link) (mapcar (lambda (e) (endset-to-span-space e cache))
+					 (link-endsets link))))
 
-(defun endset-to-span-space (endset)
+(defun endset-to-span-space (endset &optional (cache (make-cache)))
   (if (doc-endset-p endset) endset
       (apply #'span-endset (span-endset-name endset)
-	     (merge-all (mapcar (lambda (s)
-				  (extract-range (doc-spans (origin s)) (start s) (len s)))
-				(span-endset-spans endset))))))
+	     (merge-all
+	      (apply #'append
+		     (mapcar (lambda (s)
+			       (extract-range (doc-spans (get-from-cache (origin s) cache))
+					      (start s)
+					      (len s)))
+			     (span-endset-spans endset)))))))
 
 ;;;; Scrolls and publishing
 
