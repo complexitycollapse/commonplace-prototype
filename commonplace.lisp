@@ -865,3 +865,20 @@ found"
 
 (defun create-hash (leaf-string &optional (length default-hash-length+))
   (subseq (ironclad:byte-array-to-hex-string (get-digest-for-string leaf-string)) 0 length))
+
+;;;; Test repo
+(defun recreate-test-repo ()
+  (set-test-repo)
+  (cl-fad:delete-directory-and-files repo-path* :if-does-not-exist :ignore)
+  (init)
+  (let ((doc (new-doc)))
+    (format T "Created doc ~A~%" doc)
+    (append-text doc "0123456789")
+    (format T "Appended text '0123456789' to ~A~%" doc)
+    (append-text doc (format nil "ABCDEFGHIJKLMNOPQRSTUVWXYZ~%~%"))
+    (format T "Appended text 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' to ~A~%" doc)
+    (let ((imported (import-file (repo-path "../" "elegy.txt"))))
+      (format T "Imported poetry as ~A~%" imported)
+      (transclude doc (doc-length doc) imported 54 188)
+      (format T "Transcluded 188 characters poetry from ~A into ~A~%" imported doc)
+      (format T "~A~%" (export-text doc)))))

@@ -41,10 +41,13 @@
 					   0
 					   (length (content-leaf-contents new-leaf))))))))))
 
-(defun export-text (name output-filename)
-  (let ((doc (safe-load-doc name)))
-      (with-open-file (s output-filename :direction :output :if-exists :supersede)
-	(princ (generate-concatatext (doc-spans doc)) s))))
+(defun export-text (name &optional output-filename)
+  (let* ((doc (safe-load-doc name))
+	 (text (generate-concatatext (doc-spans doc))))
+    (if output-filename
+	(with-open-file (s output-filename :direction :output :if-exists :supersede)
+	  (princ text s))
+	text)))
 
 (defun doc-length (name) (reduce #'+ (doc-spans (safe-load-doc name)) :key #'len))
 
