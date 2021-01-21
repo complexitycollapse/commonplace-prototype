@@ -1,5 +1,7 @@
 ;;;; api.lisp
 
+(in-package :commonplace)
+
 (defmacro with-safely-loaded-doc (name &body body)
   `(f-with-safely-loaded-doc ,name (lambda (,(intern "DOC")) ,@body)))
 
