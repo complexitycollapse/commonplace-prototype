@@ -53,8 +53,10 @@
 
 (defun doc-length (name) (reduce #'+ (doc-spans (safe-load-doc name)) :key #'len))
 
-(defun add-link (doc-name link)
-  (with-safely-loaded-doc doc-name (add-link-to-end doc link)))
+(defun add-link (doc-name link-or-spec)
+  (let ((link (if (consp link-or-spec) (create-link-from-spec link-or-spec) link-or-spec)))
+    (save-leaf link)
+    (with-safely-loaded-doc doc-name (add-link-to-end doc link))))
 
 (defun safe-load-doc (name)
   (let ((hash (if (hash-name-p name) name (resolve-doc-name name))))

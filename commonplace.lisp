@@ -394,7 +394,8 @@ parts that do"
 		 ((keywordp x)
 		  (if name (error "Endset ~S has not contents" name))
 		  (do-endsets (cdr spec) x))
-		 ((stringp x) (cons (doc-endset name x) (do-endsets (cdr spec))))
+		 ((stringp x) (cons (doc-endset name (resolve-doc-name x))
+				    (do-endsets (cdr spec))))
 		 ((consp x) (cons (apply #'span-endset name
 					 (if (consp (car x))
 					     (mapcar #'do-span x)
@@ -403,11 +404,13 @@ parts that do"
 	   (do-span (list)
 	     (if (not (= 3 (length list)))
 		 (error "Span requires origin, start and length only: ~S" list))
+	     (if (not (stringp (first list)))
+		 (error "Origin must be a document name"))
 	     (if (not (integerp (second list)))
 		 (error "Start must be an integer: ~S" (second list)))
 	     (if (not (integerp (third list)))
 		 (error "Length must be an integer: ~S" (third list)))
-	     (apply #'span list)))
+	     (apply #'span (resolve-doc-name (car list)) (cdr list))))
     (if (link-p spec) spec
 	(link-to-span-space
 	 (apply #'link (make-keyword (car spec)) (do-endsets (cdr spec)))))))
@@ -635,7 +638,8 @@ parts that do"
 	  (read-from-string (subseq (second parts) 6))
 	  (read-from-string (subseq (third parts) 7)))))
 
-(defun parse-link-include (link-include-line) (load-and-parse (subseq link-include-line 5)))
+(defun parse-link-include (link-include-line)
+  (load-and-parse (make-hash-name :hash  (subseq link-include-line 5))))
 
 (defun parse-link-contents (link)
   (let ((parts (split-sequence #\; (subseq link 0 (1- (length link))))))
@@ -696,7 +700,9 @@ parts that do"
 	  (serialize-name (origin section)) (start section) (len section)))
 
 (defun serialize-link-include (link)
-  (format nil "link:~A~%" (serialize-name (link-name link))))
+  (if (null (link-name link))
+      (error "Attempt to serialize a document that has an unsaved link")
+      (format nil "link:~A~%" (serialize-name (link-name link)))))
 
 (defun serialize-link-contents (link)
   (format nil "~A;~{~A~^;~}~%"
@@ -881,4 +887,9 @@ found"
       (format T "Imported poetry as ~A~%" imported)
       (transclude doc (doc-length doc) imported 54 188)
       (format T "Transcluded 188 characters poetry from ~A into ~A~%" imported doc)
-      (format T "~A~%" (export-text doc)))))
+      (format T "~A~%" (export-text doc))
+      (add-link doc (link "quote"
+			  (doc-endset "origin" (resolve-doc-name imported))
+			  (span-endset nil (span (resolve-doc-name doc) 38 188)))))
+    (add-link doc `("verse" :lines (,doc 38 188)))
+    doc))
