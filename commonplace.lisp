@@ -71,6 +71,9 @@
 (defun make-keyword (x)
   (intern (string-upcase (with-output-to-string (s) (princ x s))) (symbol-package :x)))
 
+(defmacro build ((name constructor) &body body)
+  `(let ((,name ,constructor)) ,@body ,name))
+
 ;;; Span operations
 
 (defun span (origin start length) (make-span :origin origin :start start :len length))
@@ -217,11 +220,10 @@ parts that do"
 (defun get-doc-name-path (name) (repo-path "names/" name))
 
 (defun new-doc-name (version-name)
-  (let ((name (generate-doc-name-string)))
+  (build (name (generate-doc-name-string))
     (with-open-file (s (get-doc-name-path name)
 		       :direction :output :if-does-not-exist :create :if-exists :error)
-      (princ (hash-name-hash version-name) s))
-    name))
+      (princ (hash-name-hash version-name) s))))
 
 (defun update-doc-name (name new-hash)
   (with-open-file (s (get-doc-name-path name)
@@ -365,11 +367,10 @@ parts that do"
 (defun in-cache (name cache) (nth-value 1 (gethash name cache)))
 
 (defun get-from-cache (name cache)
-  (let ((value (gethash name cache)))
+  (build (value (gethash name cache))
     (when (not (in-cache name cache))
       (setf value (load-and-parse name))
-      (setf (gethash name cache) value))
-    value))
+      (setf (gethash name cache) value))))
 
 ;;;; Links
 
@@ -470,9 +471,8 @@ parts that do"
 	  (setf deduped (remove it deduped)))))))
 
 (defun create-leaf-from-map (map)
-  (let ((leaf (new-content-leaf (generate-concatatext map))))
-    (set-hash-name leaf (serialize-leaf leaf))
-    leaf))
+  (build (leaf (new-content-leaf (generate-concatatext map)))
+    (set-hash-name leaf (serialize-leaf leaf))))
 
 (defun migrate-scratch-spans-to-leaf (doc map leaf-name)
   (replace-spans
@@ -553,11 +553,10 @@ parts that do"
     leaf))
 
 (defun load-by-name (name)
-  (let ((file (make-fillable-string)))
+  (build (file (make-fillable-string))
     (with-open-file (s (name-to-path name) :if-does-not-exist nil)
       (if (null s) (return-from load-by-name nil))
-      (drain s (lambda (c) (vector-push-extend c file)))
-      file)))
+      (drain s (lambda (c) (vector-push-extend c file))))))
 
 (defun save-by-name (name contents)
   (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
@@ -721,9 +720,8 @@ parts that do"
 (defun init-acceptor ()  (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
     (setf (hunchentoot:content-type*) "text/plain") ; how should this be handled?
 					; TODO Cannot assume :CONTENT below
-    (let ((leaf (load-by-name (parse-name name))))
-      (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+))
-      leaf)))
+    (build (leaf (load-by-name (parse-name name)))
+      (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+)))))
 
 ;;; Client
 
@@ -808,38 +806,35 @@ found"
   (mapcar #'encode-sextet (apply #'compute-sextets octets)))
 
 (defun decode-chars (&rest chars)
-  (let ((codes (apply #'compute-octets (mapcar #'decode-char chars))))
+  (build (codes (apply #'compute-octets (mapcar #'decode-char chars)))
     (do ((c (car (last codes)) (car (last codes))))
 	((not (zerop c)))
-      (setf codes (butlast codes)))
-    codes))
+      (setf codes (butlast codes)))))
 
 (defun safe-char-code (c) (if c (char-code c)))
 
 (defun base64-encode-octets (octets)
-  (let ((arr (make-fillable-string))
-	(pos 0))
-    (labels ((pull () (if (>= pos (length octets)) nil (prog1 (aref octets pos) (incf pos)))))
-      (loop
-	for a = (pull)
-	for b = (pull)
-	for c = (pull)
-	while a
-	do (dolist (x (encode-chars a b c)) (vector-push-extend x arr)))
-      arr)))
+  (build (arr (make-fillable-string))
+    (let ((pos 0))
+      (labels ((pull () (if (>= pos (length octets)) nil (prog1 (aref octets pos) (incf pos)))))
+	(loop
+	   for a = (pull)
+	   for b = (pull)
+	   for c = (pull)
+	   while a
+	   do (dolist (x (encode-chars a b c)) (vector-push-extend x arr)))))))
 
 (defun base64-decode-string (str)
-  (let ((arr (make-array '(0) :element-type '(unsigned-byte 8) :adjustable T :fill-pointer 0))
-	(pos 0))
-    (labels ((pull () (if (>= pos (length str)) nil (prog1 (aref str pos) (incf pos)))))
-      (loop
-	for a = (pull)
-	while a
-	for b = (pull)
-	for c = (pull)
-	for d = (pull)
-	do (dolist (x (decode-chars a b c d)) (vector-push-extend x arr)))
-      arr)))
+  (build (arr (make-array '(0) :element-type '(unsigned-byte 8) :adjustable T :fill-pointer 0))
+    (let ((pos 0))
+      (labels ((pull () (if (>= pos (length str)) nil (prog1 (aref str pos) (incf pos)))))
+	(loop
+	   for a = (pull)
+	   while a
+	   for b = (pull)
+	   for c = (pull)
+	   for d = (pull)
+	   do (dolist (x (decode-chars a b c d)) (vector-push-extend x arr)))))))
 
 ;;;; Signatures
 
@@ -873,7 +868,7 @@ found"
   (set-test-repo)
   (cl-fad:delete-directory-and-files repo-path* :if-does-not-exist :ignore)
   (init)
-  (let ((doc (new-doc)))
+  (build (doc (new-doc))
     (format T "Created doc ~A~%" doc)
     (append-text doc "0123456789")
     (format T "Appended text '0123456789' to ~A~%" doc)
@@ -887,5 +882,4 @@ found"
       (add-link doc (link "quote"
 			  (doc-endset "origin" (resolve-doc-name imported))
 			  (span-endset nil (span (resolve-doc-name doc) 38 188)))))
-    (add-link doc `("verse" :lines (,doc 38 188)))
-    doc))
+    (add-link doc `("verse" :lines (,doc 38 188)))))

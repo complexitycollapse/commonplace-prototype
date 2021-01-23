@@ -29,11 +29,10 @@
 		     (doc-spans source) start length target-spans insert-point)))))
 
 (defun delete-leaf (name)
-  (let ((exists (leaf-exists name)))
+  (build (exists (leaf-exists name))
     (when exists
       (delete-file (name-to-path (resolve-doc-name name)))
-      (delete-doc-name name))
-    exists))
+      (delete-doc-name name))))
 
 (defun import-file (path)
   (let ((new-leaf (save-leaf (create-content-from-file path))))
@@ -44,12 +43,11 @@
 					   (length (content-leaf-contents new-leaf))))))))))
 
 (defun export-text (name &optional output-filename)
-  (let* ((doc (safe-load-doc name))
-	 (text (generate-concatatext (doc-spans doc))))
-    (if output-filename
-	(with-open-file (s output-filename :direction :output :if-exists :supersede)
-	  (princ text s))
-	text)))
+  (let* ((doc (safe-load-doc name)))
+    (build (text (generate-concatatext (doc-spans doc)))
+      (if output-filename
+	  (with-open-file (s output-filename :direction :output :if-exists :supersede)
+	    (princ text s))))))
 
 (defun doc-length (name) (reduce #'+ (doc-spans (safe-load-doc name)) :key #'len))
 
