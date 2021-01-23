@@ -32,10 +32,6 @@
 
 ;;;; Common functions
 
-(defmacro not-implemented (name args)
-  `(defun ,name ,args (declare ,@ (mapcar (lambda (a) `(ignore ,a)) args))
-	  (error "Function not implemented ~A" ',name)))
-
 (defmacro probe (form)
   (with-unique-names (val)
     `(let ((,val ,form)) (format T ,(format nil "~A: ~~A~%" form) ,val) ,val)))
