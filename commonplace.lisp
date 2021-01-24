@@ -255,7 +255,8 @@ parts that do"
     (setf (doc-name-main name) (car parts))
     (when version
       (if (or (<= (length version) 1) (not (eql #\) (elt version (1- (length version))))))
-	  (error "Doc name with version must be of the format 'name(version)', actually '~A'" str))
+	  (error "Doc name with version must be of the format 'name(version)', actually '~A'"
+		 str))
       (setf (doc-name-version name) (subseq version 0 (1- (length version)))))))
 
 (defmethod init-name-from-string ((name scroll-name) str)
@@ -270,7 +271,8 @@ parts that do"
   (format nil "scroll/~A" (scroll-name-scroll name)))
 
 (defmethod serialize-name ((name doc-name))
-  (if (doc-name-version name) (format nil "~A(~A)" (doc-name-main name) (doc-name-version name))
+  (if (doc-name-version name)
+      (format nil "~A(~A)" (doc-name-main name) (doc-name-version name))
       (doc-name-main name)))
 
 (defmethod serialize-name ((name hash-name)) (hash-name-hash name))
@@ -284,7 +286,8 @@ parts that do"
   (setf (leaf-name leaf) (make-hash-name :hash (create-hash serialized-leaf))))
 
 (defun get-next-version-name (old-name)
-  (make-doc-name :main (doc-name-main old-name) :version (format nil "~A" (1+ (parse-integer (doc-name-version old-name))))))
+  (make-doc-name :main (doc-name-main old-name)
+		 :version (format nil "~A" (1+ (parse-integer (doc-name-version old-name))))))
 
 ;;;; Leaf operations
 
@@ -822,7 +825,8 @@ found"
 (defun base64-encode-octets (octets)
   (build (arr (make-fillable-string))
     (let ((pos 0))
-      (labels ((pull () (if (>= pos (length octets)) nil (prog1 (aref octets pos) (incf pos)))))
+      (labels ((pull () (if (>= pos (length octets)) nil
+			    (prog1 (aref octets pos) (incf pos)))))
 	(loop
 	   for a = (pull)
 	   for b = (pull)
