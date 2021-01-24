@@ -4,7 +4,7 @@
 
 (defstruct (span :conc-name) origin start len)
 (defstruct name)
-(defstruct (tumbler-name (:include name)) parts)
+(defstruct (doc-name (:include name)) main version)
 (defstruct (hash-name (:include name)) hash)
 (defstruct (scroll-name (:include name)) scroll)
 (defstruct (scratch-name (:include name)))
@@ -238,8 +238,8 @@ parts that do"
 
 ;;;; Leaf names
 
-(defmethod get-path-extensions ((name tumbler-name))
-  (list "public/" (format nil "~{~A~^_~}" (tumbler-name-parts name))))
+(defmethod get-path-extensions ((name doc-name))
+  (error "Cannot convert doc name to path name: ~S" name))
 
 (defmethod get-path-extensions ((name scroll-name))
   (list "scrolls/" (scroll-name-scroll name)))
@@ -249,8 +249,14 @@ parts that do"
 (defmethod get-path-extensions ((name hash-name))
   (list "public/" (hash-name-hash name)))
 
-(defmethod init-name-from-string ((name tumbler-name) str)
-  (setf (tumbler-name-parts name) (mapcar #'parse-integer (split-sequence #\. str))))
+(defmethod init-name-from-string ((name doc-name) str)
+  (let* ((parts (split-sequence #\( str))
+	 (version (cadr parts)))
+    (setf (doc-name-main name) (car parts))
+    (when version
+      (if (or (<= (length version) 1) (not (eql #\) (elt version (1- (length version))))))
+	  (error "Doc name with version must be of the format 'name(version)', actually '~A'" str))
+      (setf (doc-name-version name) (subseq version 0 (1- (length version)))))))
 
 (defmethod init-name-from-string ((name scroll-name) str)
   (setf (scroll-name-scroll name) (subseq str 7)))
@@ -263,8 +269,9 @@ parts that do"
 (defmethod serialize-name ((name scroll-name))
   (format nil "scroll/~A" (scroll-name-scroll name)))
 
-(defmethod serialize-name ((name tumbler-name))
-  (format nil "~{~A~^.~}" (tumbler-name-parts name)))
+(defmethod serialize-name ((name doc-name))
+  (if (doc-name-version name) (format nil "~A(~A)" (doc-name-main name) (doc-name-version name))
+      (doc-name-main name)))
 
 (defmethod serialize-name ((name hash-name)) (hash-name-hash name))
 
@@ -277,8 +284,7 @@ parts that do"
   (setf (leaf-name leaf) (make-hash-name :hash (create-hash serialized-leaf))))
 
 (defun get-next-version-name (old-name)
-  (let ((parts (tumbler-name-parts old-name)))
-    (make-tumbler-name :parts (nconc (butlast parts) (list (1+ (car (last parts))))))))
+  (make-doc-name :main (doc-name-main old-name) :version (format nil "~A" (1+ (parse-integer (doc-name-version old-name))))))
 
 ;;;; Leaf operations
 
