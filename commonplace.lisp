@@ -384,9 +384,10 @@ parts that do"
 ;;;; Links
 
 (defun link (type &rest endsets) (make-link :owner user+ :type type :endsets endsets))
-(defun doc-endset (name doc)
-  (make-doc-endset :name name :doc-name (if (doc-p doc) (doc-name doc) doc)))
-(defun span-endset (name &rest spans) (make-span-endset :name name :spans spans))
+(defun doc-endset (name doc-or-doc-name)
+  (make-doc-endset :name name :doc-name (if (doc-p doc-or-doc-name) (doc-name doc-or-doc-name)
+					    doc-or-doc-name)))
+(defun span-endset (name spans) (make-span-endset :name name :spans spans))
 
 (defun add-link-to-end (doc link) (pushend link (doc-links doc)))
 (defun insert-link (doc link n) (setf (doc-links doc) (insert-at link (doc-links doc) n)))
@@ -402,10 +403,9 @@ parts that do"
 		  (do-endsets (cdr spec) x))
 		 ((stringp x) (cons (doc-endset name (resolve-doc-name x))
 				    (do-endsets (cdr spec))))
-		 ((consp x) (cons (apply #'span-endset name
-					 (if (consp (car x))
-					     (mapcar #'do-span x)
-					     (list (do-span x))))
+		 ((consp x) (cons (span-endset name (if (consp (car x))
+							(mapcar #'do-span x)
+							(list (do-span x))))
 				  (do-endsets (cdr spec)))))))
 	   (do-span (list)
 	     (if (not (= 3 (length list)))
@@ -427,14 +427,15 @@ parts that do"
 
 (defun endset-to-span-space (endset &optional (cache (make-cache)))
   (if (doc-endset-p endset) endset
-      (apply #'span-endset (span-endset-name endset)
-	     (merge-all
-	      (apply #'append
-		     (mapcar (lambda (s)
-			       (extract-range (doc-spans (get-from-cache (origin s) cache))
-					      (start s)
-					      (len s)))
-			     (span-endset-spans endset)))))))
+      (span-endset
+       (span-endset-name endset)
+       (merge-all
+	(apply #'append
+	       (mapcar (lambda (s)
+			 (extract-range (doc-spans (get-from-cache (origin s) cache))
+					(start s)
+					(len s)))
+		       (span-endset-spans endset)))))))
 
 ;;;; Scrolls and publishing
 
@@ -891,5 +892,5 @@ found"
       (format T "~A~%" (export-text doc))
       (add-link doc (link "quote"
 			  (doc-endset "origin" (resolve-doc-name imported))
-			  (span-endset nil (span (resolve-doc-name doc) 38 188)))))
+			  (span-endset nil (list (span (resolve-doc-name doc) 38 188))))))
     (add-link doc `("verse" :lines (,doc 38 188)))))
