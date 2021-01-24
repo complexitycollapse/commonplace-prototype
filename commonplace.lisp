@@ -249,23 +249,16 @@ parts that do"
 (defmethod get-path-extensions ((name hash-name))
   (list "public/" (hash-name-hash name)))
 
-(defmethod init-name-from-string ((name doc-name) str)
-  (let* ((parts (split-sequence #\( str))
-	 (version (cadr parts)))
-    (setf (doc-name-main name) (car parts))
-    (when version
-      (if (or (<= (length version) 1) (not (eql #\) (elt version (1- (length version))))))
-	  (error "Doc name with version must be of the format 'name(version)', actually '~A'"
-		 str))
-      (setf (doc-name-version name) (subseq version 0 (1- (length version)))))))
-
-(defmethod init-name-from-string ((name scroll-name) str)
-  (setf (scroll-name-scroll name) (subseq str 7)))
-
-(defmethod init-name-from-string ((name scratch-name) str))
-
-(defmethod init-name-from-string ((name hash-name) str)
-  (setf (hash-name-hash name) str))
+(defun parse-doc-name (str)
+  (build (name (make-doc-name))
+    (let* ((parts (split-sequence #\( str))
+	   (version (cadr parts)))
+      (setf (doc-name-main name) (car parts))
+      (when version
+	(if (or (<= (length version) 1) (not (eql #\) (elt version (1- (length version))))))
+	    (error "Doc name with version must be of the format 'name(version)', actually '~A'"
+		   str))
+	(setf (doc-name-version name) (subseq version 0 (1- (length version))))))))
 
 (defmethod serialize-name ((name scroll-name))
   (format nil "scroll/~A" (scroll-name-scroll name)))
@@ -399,9 +392,9 @@ parts that do"
 	     (let ((x (car spec)))
 	       (cond
 		 ((keywordp x)
-		  (if name (error "Endset ~S has not contents" name))
+		  (if name (error "Endset ~S has no contents" name))
 		  (do-endsets (cdr spec) x))
-		 ((stringp x) (cons (doc-endset name (resolve-doc-name x))
+		 ((stringp x) (cons (doc-endset name (parse-doc-name x))
 				    (do-endsets (cdr spec))))
 		 ((consp x) (cons (span-endset name (if (consp (car x))
 							(mapcar #'do-span x)
@@ -419,7 +412,7 @@ parts that do"
 	     (apply #'span (resolve-doc-name (car list)) (cdr list))))
     (if (link-p spec) spec
 	(link-to-span-space
-	 (apply #'link (make-keyword (car spec)) (do-endsets (cdr spec)))))))
+	 (apply #'link (car spec) (do-endsets (cdr spec)))))))
 
 (defun link-to-span-space (link &optional (cache (make-cache)))
   (apply #'link (link-type link) (mapcar (lambda (e) (endset-to-span-space e cache))
@@ -607,7 +600,7 @@ parts that do"
 
 (defun represents-doc-p (type) (find type '(:doc :scroll :local-scroll)))
 
-(defun parse-name (str)
+(defun parse-span-name (str)
   (cond ((string= "0" str) scratch-name+)
 	((string-starts-with "scroll/" str) (make-scroll-name :scroll (subseq str 7)))
 	(T (make-hash-name :hash str))))
@@ -639,7 +632,7 @@ parts that do"
     (assert (= (length parts) 3))
     (assert (string-starts-with "start=" (second parts)))
     (assert (string-starts-with "length=" (third parts)))
-    (span (parse-name (first parts))
+    (span (parse-span-name (first parts))
 	  (read-from-string (subseq (second parts) 6))
 	  (read-from-string (subseq (third parts) 7)))))
 
@@ -665,8 +658,7 @@ parts that do"
   (let ((nested-spans (split-sequence #\+ span :start 5)))
     (mapcar #'parse-span-section nested-spans)))
 
-(defun parse-doc-ref (doc)
-  (parse-name (subseq doc 4)))
+(defun parse-doc-ref (doc) (parse-doc-name (subseq doc 4)))
 
 ;;;; Serializing leaves
 
@@ -730,7 +722,7 @@ parts that do"
 (defun init-acceptor ()  (hunchentoot:define-easy-handler (serve-leaf :uri "/leaf") (name)
     (setf (hunchentoot:content-type*) "text/plain") ; how should this be handled?
 					; TODO Cannot assume :CONTENT below
-    (build (leaf (load-by-name (parse-name name)))
+    (build (leaf (load-by-name (parse-span-name name)))
       (if (null leaf) (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+)))))
 
 ;;; Client
@@ -891,6 +883,7 @@ found"
       (format T "Transcluded 188 characters poetry from ~A into ~A~%" imported doc)
       (format T "~A~%" (export-text doc))
       (add-link doc (link "quote"
-			  (doc-endset "origin" (resolve-doc-name imported))
-			  (span-endset nil (list (span (resolve-doc-name doc) 38 188))))))
-    (add-link doc `("verse" :lines (,doc 38 188)))))
+			  (doc-endset "origin" (parse-doc-name imported))
+			  (span-endset nil (list (span (resolve-doc-name doc) 38 188)))))
+      (add-link doc `("verse" :lines (,doc 38 188)))
+      (add-link doc `("doctest" ,imported)))))
