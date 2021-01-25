@@ -2,8 +2,8 @@
 
 (in-package :commonplace)
 
-(defmacro with-safely-loaded-doc (name &body body)
-  `(f-with-safely-loaded-doc ,name (lambda (,(intern "DOC")) ,@body)))
+(defmacro with-safely-loaded-doc (doc-or-doc-name  &body body)
+  `(f-with-safely-loaded-doc ,doc-or-doc-name (lambda (,(intern "DOC")) ,@body)))
 
 (defun new-doc () (new-doc-name (leaf-name (save-leaf (new-doc-leaf)))))
 
@@ -51,23 +51,40 @@
 
 (defun doc-length (name) (reduce #'+ (doc-spans (safe-load-doc name)) :key #'len))
 
-(defun add-link (doc-name link-or-spec)
-  (let ((link (if (consp link-or-spec) (create-link-from-spec link-or-spec) link-or-spec)))
-    (save-leaf link)
-    (with-safely-loaded-doc doc-name (add-link-to-end doc link))))
+(defun add-link (doc-or-doc-name link-or-spec)
+  (let ((link (coerce-to-link link-or-spec T)))
+    (with-safely-loaded-doc doc-or-doc-name (pushend link (doc-links doc)))))
+
+(defun insert-link (doc-or-doc-name link-or-spec n)
+  (let ((link (coerce-to-link link-or-spec T)))
+    (with-safely-loaded-doc doc-or-doc-name
+      (setf (doc-links doc) (insert-at link (doc-links doc) n)))))
+
+(defun remove-link (doc-or-doc-name n)
+  (with-safely-loaded-doc doc-or-doc-name
+    (let ((links (doc-links doc)))
+      (setf (doc-links doc) (remove (nth n links) links :test #'equalp)))))
 
 (defun safe-load-doc (name)
   (let ((hash (if (hash-name-p name) name (resolve-doc-name name))))
     (if (leaf-missing hash) (error "No leaf has the name ~A" name))
     (load-and-parse hash)))
 
-(defun f-with-safely-loaded-doc (name fn)
-  (let* ((doc (safe-load-doc name)))
+(defun f-with-safely-loaded-doc (doc-or-doc-name fn)
+  (let* ((doc (typecase doc-or-doc-name
+		(doc doc-or-doc-name)
+		(otherwise (safe-load-doc doc-or-doc-name)))))
     (funcall fn doc)
-    (update-doc-name name (leaf-name (save-leaf doc)))))
+    (if (stringp doc-or-doc-name)
+	(update-doc-name doc-or-doc-name (leaf-name (save-leaf doc))))))
 
 (defun modify-spans (name fn)
   (with-safely-loaded-doc name
     (setf (doc-spans doc) (funcall fn (doc-spans doc)))))
 
 (defun leaf-exists (name) (not (leaf-missing (resolve-doc-name name))))
+
+(defun coerce-to-link (link-or-spec create)
+  (build (link
+	  (if (consp link-or-spec) (create-link-from-spec link-or-spec) link-or-spec))
+    (if create (save-leaf link))))

@@ -382,11 +382,6 @@ parts that do"
 					    doc-or-doc-name)))
 (defun span-endset (name spans) (make-span-endset :name name :spans spans))
 
-(defun add-link-to-end (doc link) (pushend link (doc-links doc)))
-(defun insert-link (doc link n) (setf (doc-links doc) (insert-at link (doc-links doc) n)))
-(defun remove-link (doc link)
-  (setf (doc-links doc) (remove link (doc-links doc) :test #'equalp)))
-
 (defun create-link-from-spec (spec)
   (labels ((do-endsets (spec &optional name)
 	     (let ((x (car spec)))
@@ -886,4 +881,7 @@ found"
 			  (doc-endset "origin" (parse-doc-name imported))
 			  (span-endset nil (list (span (resolve-doc-name doc) 38 188)))))
       (add-link doc `("verse" :lines (,doc 38 188)))
-      (add-link doc `("doctest" ,imported)))))
+      (add-link doc `("doctest" ,imported))
+      (insert-link doc `("insertedAt2" ,imported) 2)
+      (insert-link doc `("toBeDeleted" , imported) 1)
+      (remove-link doc 1))))
