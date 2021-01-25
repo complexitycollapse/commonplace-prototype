@@ -144,7 +144,7 @@
 	(if (cadr merged) (cons (car list) (deduplicate (cdr list)))
 	    (deduplicate (cons (car merged) (cddr list)))))))
 
-(defun divide-list (list point &optional collected)
+(defun split-spans-at (list point &optional collected)
   "Divide a list of spans into two list at the given point (included in the second list)"
   (let ((s (car list)))
     (cond ((endp list) (list (nreverse collected) nil))
@@ -152,34 +152,34 @@
 	  ((> (len s) point)
 	   (let ((split (divide-span s point)))
 	     (list (nreverse (cons (car split) collected)) (cons (cadr split) (cdr list)))))
-	  (T (divide-list (cdr list) (- point (len s)) (cons s collected))))))
+	  (T (split-spans-at (cdr list) (- point (len s)) (cons s collected))))))
 
-(defun divide-twice (list start length)
+(defun split-twice (list start length)
   "Divide a list of span into three, with the central section having given start and length"
-  (let ((div (divide-list list start)))
-    (cons (car div) (divide-list (cadr div) length))))
+  (let ((div (split-spans-at list start)))
+    (cons (car div) (split-spans-at (cadr div) length))))
 
-(defun extract-range (spans start length)
+(defun crop (spans start length)
   "Create spans representing the subset of some other spans delimited by start and length."
-  (second (divide-twice spans start length)))
+  (second (split-twice spans start length)))
 
 (defun insert-spans (spans new-spans point)
   "Insert a list of spans into the middle of some existing spans."
-  (let ((div (divide-list spans point)))
+  (let ((div (split-spans-at spans point)))
     (merge-span-lists (car div) (merge-span-lists new-spans (cadr div)))))
 
 (defun delete-spans (spans start length)
   "Remove a section from some spans."
-  (let ((div (divide-twice spans start length)))
+  (let ((div (split-twice spans start length)))
     (merge-span-lists (first div) (third div))))
 
 (defun move-spans (spans start length new-pos)
-  (let ((div (divide-twice spans start length)))
+  (let ((div (split-twice spans start length)))
     (insert-spans (merge-span-lists (first div) (third div)) (second div) new-pos)))
 
 (defun transclude-spans (source-spans start length target-spans insert-point)
   "Transclude content from one set of spans into another."
-  (insert-spans target-spans (extract-range source-spans start length) insert-point))
+  (insert-spans target-spans (crop source-spans start length) insert-point))
 
 (defun find-span (spans point)
   (recur (spans pos) (spans 0)
@@ -346,14 +346,12 @@ parts that do"
   cache)
 
 (defun generate-concatatext (spans &optional (contents-hash (load-all-contents spans)))
-  (apply #'concatenate 'string
-	 (mapcar (lambda (s) (apply-span s contents-hash)) spans)))
+  (apply #'concatenate 'string (mapcar (lambda (s) (apply-span s contents-hash)) spans)))
 
 (defun generate-concatatext-clip (spans start length
 				  &optional (contents-hash (load-all-contents spans)))
     (apply #'concatenate 'string
-	 (mapcar (lambda (s) (apply-span s contents-hash))
-		 (extract-range spans start length))))
+	 (mapcar (lambda (s) (apply-span s contents-hash)) (crop spans start length))))
 
 (defun apply-span (span contents-hash)
   "Extract the text of a span from a collection of contents leaves."
@@ -420,7 +418,7 @@ parts that do"
        (merge-all
 	(apply #'append
 	       (mapcar (lambda (s)
-			 (extract-range (doc-spans (get-from-cache (origin s) cache))
+			 (crop (doc-spans (get-from-cache (origin s) cache))
 					(start s)
 					(len s)))
 		       (span-endset-spans endset)))))))
@@ -451,11 +449,8 @@ parts that do"
   (apply #'+ (mapcar #'len (doc-spans (load-and-parse local-scroll-name+)))))
 
 (defun migrate-scroll-spans-to-scroll-targets (doc scroll-spans)
-  (replace-spans
-   doc
-   (lambda (s) (if (scroll-span-p s)
-		   (extract-range scroll-spans (start s) (len s))
-		   s))))
+  (replace-spans doc (lambda (s)
+		       (if (scroll-span-p s) (crop scroll-spans (start s) (len s)) s))))
 
 (defun get-scratch-spans (doc)
   (collecting (iterate-spans doc (lambda (s) (if (scratch-span-p s) (collect s))))))
