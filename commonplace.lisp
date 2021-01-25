@@ -219,8 +219,8 @@ parts that do"
 
 (defun get-doc-name-path (name) (repo-path "names/" name))
 
-(defun new-doc-name (version-name)
-  (build (name (generate-doc-name-string))
+(defun new-doc-name (version-name &optional pre-chosen-name)
+  (build (name (or pre-chosen-name (generate-doc-name-string)))
     (with-open-file (s (get-doc-name-path name)
 		       :direction :output :if-does-not-exist :create :if-exists :error)
       (princ (hash-name-hash version-name) s))))
@@ -862,17 +862,18 @@ found"
   (subseq (ironclad:byte-array-to-hex-string (get-digest-for-string leaf-string)) 0 length))
 
 ;;;; Test repo
+
 (defun recreate-test-repo ()
   (set-test-repo)
   (cl-fad:delete-directory-and-files repo-path* :if-does-not-exist :ignore)
   (init)
-  (build (doc (new-doc))
+  (build (doc (new-doc "test-doc"))
     (format T "Created doc ~A~%" doc)
     (append-text doc "0123456789")
     (format T "Appended text '0123456789' to ~A~%" doc)
     (append-text doc (format nil "ABCDEFGHIJKLMNOPQRSTUVWXYZ~%~%"))
     (format T "Appended text 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' to ~A~%" doc)
-    (let ((imported (import-file (repo-path "../" "elegy.txt"))))
+    (let ((imported (import-file (repo-path "../" "elegy.txt") "elegy")))
       (format T "Imported poetry as ~A~%" imported)
       (transclude doc (doc-length doc) imported 54 188)
       (format T "Transcluded 188 characters poetry from ~A into ~A~%" imported doc)

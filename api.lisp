@@ -5,7 +5,7 @@
 (defmacro with-safely-loaded-doc (doc-or-doc-name  &body body)
   `(f-with-safely-loaded-doc ,doc-or-doc-name (lambda (,(intern "DOC")) ,@body)))
 
-(defun new-doc () (new-doc-name (leaf-name (save-leaf (new-doc-leaf)))))
+(defun new-doc (&optional name) (new-doc-name (leaf-name (save-leaf (new-doc-leaf))) name))
 
 (defun append-text (name text)
   (modify-spans name (lambda (spans)
@@ -34,13 +34,14 @@
       (delete-file (name-to-path (resolve-doc-name name)))
       (delete-doc-name name))))
 
-(defun import-file (path)
+(defun import-file (path &optional name)
   (let ((new-leaf (save-leaf (create-content-from-file path))))
     (new-doc-name
      (leaf-name
       (save-leaf (new-doc-leaf (list (span (leaf-name new-leaf)
 					   0
-					   (length (content-leaf-contents new-leaf))))))))))
+					   (length (content-leaf-contents new-leaf)))))))
+     name)))
 
 (defun export-text (name &optional output-filename)
   (let* ((doc (safe-load-doc name)))
