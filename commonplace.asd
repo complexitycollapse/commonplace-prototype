@@ -9,4 +9,5 @@
   :depends-on (:cl-utilities :osicat :hunchentoot :drakma :cl-fad :ironclad :cl-ssh-keys)
   :components ((:file "packages")
                (:file "commonplace")
-	       (:file "api")))
+	       (:file "api")
+	       (:file "cli")))

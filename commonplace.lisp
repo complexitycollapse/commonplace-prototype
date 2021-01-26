@@ -535,22 +535,30 @@ parts that do"
 
 ;;; Repo management
 
-(defun set-test-repo ()
-  (setf repo-path* test-repo+))
+(defun working-directory () (cl-fad:pathname-as-directory (sb-posix:getcwd)))
+(defun set-test-repo () (setf repo-path* test-repo+))
 
-(defun repo-path (&rest extensions)
+(defun merge-path (base &rest extensions)
   (apply #'cl-fad:merge-pathnames-as-file
-	 (cl-fad:pathname-as-directory repo-path*)
+	 (cl-fad:pathname-as-directory base)
 	 extensions))
 
+(defun repo-path (&rest extensions) (apply #'merge-path repo-path* extensions))
 (defun name-to-path (name) (apply #'repo-path (get-path-extensions name)))
 
-(defun init ()
-  (ensure-directories-exist (repo-path "public/"))
-  (ensure-directories-exist (repo-path "scrolls/"))
-  (ensure-directories-exist (repo-path "names/"))
-  (save-leaf (make-doc :name local-scroll-name+ :owner user+ :type :local-scroll))
-  (save-leaf (make-content-leaf :name scratch-name+ :owner user+)))
+(defun init (&optional new-dir-name)
+  (let ((repo-path*
+	 (if new-dir-name
+	     (cl-fad:merge-pathnames-as-directory
+	      (working-directory)
+	      (concatenate 'string new-dir-name "/"))
+	     repo-path*)))
+    (ensure-directories-exist (repo-path "public/"))
+    (ensure-directories-exist (repo-path "scrolls/"))
+    (ensure-directories-exist (repo-path "names/"))
+    (save-leaf (make-doc :name local-scroll-name+ :owner user+ :type :local-scroll))
+    (save-leaf (make-content-leaf :name scratch-name+ :owner user+))
+    repo-path*))
 
 (defun load-and-parse (name)
   (parse-vector (load-by-name name) name))

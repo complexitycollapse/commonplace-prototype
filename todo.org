@@ -9,3 +9,4 @@
 * DONE Move links to their own files
 * DONE API for links
 * TODO Base64 encoding doesn't work for UTF-8. Need to convert to binary properly
+* TODO Imported file contents should go on the scroll
