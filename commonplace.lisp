@@ -110,6 +110,20 @@
 	(list (span (origin s1) start (- (max (next-pos s1) (next-pos s2)) start))))
       (list s1 s2)))
 
+(defun length-sum (spans)
+  (if (endp spans) 0 (+ (len (car spans)) (length-sum (cdr spans)))))
+
+(define-condition point-out-of-bounds-error (error)
+  ((point :initarg :point)
+   (spans :initarg :spans)))
+
+(defmethod print-object ((object point-out-of-bounds-error) stream)
+  (print-unreadable-object (object stream :type t :identity t)
+    (format stream "P~S SPANS:~S" (slot-value object 'point) (slot-value object 'spans))))
+
+(defun out-of-bounds (point spans)
+  (error 'point-out-of-bounds-error :point point :spans spans))
+
 (defun divide-span-at-point (s1 point)
   (with-slots (start length) s1
     (if (and (span-contains s1 point) (> point (start s1)))
@@ -144,15 +158,18 @@
 	(if (cadr merged) (cons (car list) (deduplicate (cdr list)))
 	    (deduplicate (cons (car merged) (cddr list)))))))
 
-(defun split-spans-at (list point &optional collected)
+(defun split-spans-at (list point)
   "Divide a list of spans into two list at the given point (included in the second list)"
-  (let ((s (car list)))
-    (cond ((endp list) (list (nreverse collected) nil))
-	  ((zerop point) (list (nreverse collected) list))
-	  ((> (len s) point)
-	   (let ((split (divide-span s point)))
-	     (list (nreverse (cons (car split) collected)) (cons (cadr split) (cdr list)))))
-	  (T (split-spans-at (cdr list) (- point (len s)) (cons s collected))))))
+  (labels
+      ((split (s l p collected)
+	 (cond ((zerop p) (list (nreverse collected) (if s (cons s l) l)))
+	       ((null s) (out-of-bounds point list))
+	       ((> (len s) p)
+		(let ((split (divide-span s p)))
+		  (list (nreverse (cons (car split) collected)) (cons (cadr split) l))))
+	       (T (split (car l) (cdr l) (- p (len s)) (cons s collected))))))
+    (if (endp list) (out-of-bounds point list))
+    (split (car list) (cdr list) point nil)))
 
 (defun split-twice (list start length)
   "Divide a list of span into three, with the central section having given start and length"
