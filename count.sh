@@ -1,1 +1,1 @@
-git log | awk 'END {print (NR+1)/6}'
+git log --pretty=format:"x" | awk 'END {print NR}'
