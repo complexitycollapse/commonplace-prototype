@@ -66,9 +66,11 @@
 (defun export-text (name &optional output-filename)
   (let* ((doc (safe-load-doc name)))
     (build (text (generate-concatatext (doc-spans doc)))
-      (if output-filename
-	  (with-open-file (s output-filename :direction :output :if-exists :supersede)
-	    (princ text s))))))
+      (cond
+	((eq T output-filename) (princ text)) ; write to standard output
+	(output-filename
+	     (with-open-file (s output-filename :direction :output :if-exists :supersede)
+	       (princ text s)))))))
 
 (defun doc-length (doc-or-doc-name)
   (let ((doc (if (stringp doc-or-doc-name) (safe-load-doc doc-or-doc-name) doc-or-doc-name)))

@@ -49,6 +49,11 @@
 	((endp (cdr list)) (cons (car list) (reverse others)))
 	(T (lift (cdr list) (cons (car list) others)))))
 
+(defun drop (n list)
+  (cond ((zerop n) list)
+	((null list) nil)
+	(T (drop (1- n) (cdr list)))))
+
 (defmacro recur (args vals &body body)
   `(labels ((recur ,args ,@body))
      (recur ,@vals)))
