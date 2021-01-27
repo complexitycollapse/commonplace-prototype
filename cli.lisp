@@ -13,12 +13,26 @@
   (if (endp args) (api-out "Missing command line arguments.")
       (case (make-keyword (car args))
 	(:init (api-init (cdr args)))
+	(:new (api-new (cdr args)))
+	(:append (api-append (cdr args)))
 	(otherwise (api-verb-not-recognised (car args))))))
 
 (defun api-init (args)
   (cond ((cdr args) (api-out "Unrecognised arguments to init."))
 	((endp args) (api-out "You must specify a repository name."))
 	(T (api-out "Created new repository in ~A." (init (car args))))))
+
+(defun api-new (args)
+  (if args (api-out "Unrecognised arguments to new.")
+      (api-out "Created ~A" (new-doc))))
+
+(defun api-append (args)
+  (let ((name (car args))
+	(text (cadr args)))
+    (cond ((null name) (api-out "Missing name argument to append"))
+	  ((null text) (api-out "Missing text argument to append"))
+	  ((cddr args) (api-out "Unrecognised arguments to append."))
+	  (T (append-text name text)))))
 
 (defun api-verb-not-recognised (verb)
   (api-out "~A is not a recognised verb." (string-downcase verb)))
