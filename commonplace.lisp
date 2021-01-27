@@ -533,6 +533,10 @@ parts that do"
 	  ((eq c :eof))
 	(funcall constructor c)))
 
+(defun drain-string (stream)
+  (build (str (make-fillable-string))
+    (drain stream (lambda (c) (vector-push-extend c str)))))
+
 ;;; Repo management
 
 (defun working-directory () (cl-fad:pathname-as-directory (sb-posix:getcwd)))

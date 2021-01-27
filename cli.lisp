@@ -29,10 +29,13 @@
 (defun api-append (args)
   (let ((name (car args))
 	(text (cadr args)))
-    (cond ((null name) (api-out "Missing name argument to append"))
-	  ((null text) (api-out "Missing text argument to append"))
-	  ((cddr args) (api-out "Unrecognised arguments to append."))
-	  (T (append-text name text)))))
+    (if (cddr args) (api-out "Unrecognised arguments to append.")
+	(if (null name) (api-out "Missing name argument to append.")
+	    (progn
+	      (if (null text) (setf text (drain-string *standard-input*)))
+	      (if (or (null text) (zerop (length text)))
+		  (api-out "Missing text argument to append.")
+		  (append-text name text)))))))
 
 (defun api-verb-not-recognised (verb)
   (api-out "~A is not a recognised verb." (string-downcase verb)))
