@@ -10,3 +10,5 @@
 * DONE API for links
 * TODO Base64 encoding doesn't work for UTF-8. Need to convert to binary properly
 * TODO Imported file contents should go on the scroll
+* TODO Need some file existence error handling in the CLI
+* TODO Exporting link information
