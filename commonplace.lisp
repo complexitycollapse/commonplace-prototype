@@ -237,7 +237,11 @@ parts that do"
 ;;;; Document names
 
 (defun generate-doc-name-string ()
-  (ironclad:byte-array-to-hex-string (map-into (make-array '(3)) (lambda () (random 256)))))
+  (let ((name (ironclad:byte-array-to-hex-string
+	       (map-into (make-array '(3)) (lambda () (random 256))))))
+    (if (probe-file (get-doc-name-path name))
+	(generate-doc-name-string)
+	name)))
 
 (defun get-doc-name-path (name) (repo-path "names/" name))
 
@@ -353,12 +357,11 @@ parts that do"
 (defun make-new-version (doc)
   (new-doc-leaf (doc-spans doc) (doc-links doc)))
 
-(defun create-content-from-file (path)
+(defun load-contents-of-file (path)
   "Import text from a file"
-  (let ((contents (make-fillable-string)))
+  (build (contents (make-fillable-string))
     (with-open-file (s path)
-      (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))
-    (new-content-leaf contents)))
+      (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))))
 
 (defun load-all-contents (spans &optional (cache (make-cache)))
   (dolist (a (mapcar #'origin spans))

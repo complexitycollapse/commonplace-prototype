@@ -55,13 +55,9 @@
       (delete-doc-name name))))
 
 (defun import-file (path &optional name)
-  (let ((new-leaf (save-leaf (create-content-from-file path))))
-    (new-doc-name
-     (leaf-name
-      (save-leaf (new-doc-leaf (list (span (leaf-name new-leaf)
-					   0
-					   (length (content-leaf-contents new-leaf)))))))
-     name)))
+  (let ((contents (load-contents-of-file path)))
+    (build (doc-name (new-doc name))
+      (append-text doc-name contents))))
 
 (defun export-text (name &optional output-filename)
   (let* ((doc (safe-load-doc name)))
