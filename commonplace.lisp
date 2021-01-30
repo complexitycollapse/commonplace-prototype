@@ -427,9 +427,7 @@ parts that do"
 	     (if (not (integerp (third list)))
 		 (error "Length must be an integer: ~S" (third list)))
 	     (apply #'span (resolve-doc-name (car list)) (cdr list))))
-    (if (link-p spec) spec
-	(link-to-span-space
-	 (apply #'link (car spec) (do-endsets (cdr spec)))))))
+    (apply #'link (car spec) (do-endsets (cdr spec)))))
 
 (defun link-to-span-space (link &optional (cache (make-cache)))
   (apply #'link (link-type link) (mapcar (lambda (e) (endset-to-span-space e cache))

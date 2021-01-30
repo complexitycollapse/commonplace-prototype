@@ -72,10 +72,11 @@
   (let ((doc (if (stringp doc-or-doc-name) (safe-load-doc doc-or-doc-name) doc-or-doc-name)))
     (length-sum (doc-spans doc))))
 
-(defun new-link (link-or-spec) (hash-name-hash (leaf-name (coerce-to-link link-or-spec T))))
+(defun new-link (link-or-spec)
+  (hash-name-hash (leaf-name (make-span-space-link link-or-spec))))
 
 (defun add-link (doc-or-doc-name link-designator)
-  (let ((link (coerce-to-link link-designator T))
+  (let ((link (make-span-space-link link-designator))
 	(index 0))
     (with-safely-loaded-doc doc-or-doc-name
       (pushend link (doc-links doc))
@@ -83,7 +84,7 @@
     (values link index)))
 
 (defun insert-link (doc-or-doc-name link-designator n)
-  (let ((link (coerce-to-link link-designator T)))
+  (let ((link (make-span-space-link link-designator)))
     (with-safely-loaded-doc doc-or-doc-name
       (check-link-bounds doc doc-or-doc-name n)
       (setf (doc-links doc) (insert-at link (doc-links doc) n)))))
@@ -109,12 +110,15 @@
 
 (defun leaf-exists (name) (not (leaf-missing (resolve-doc-name name))))
 
-(defun coerce-to-link (link-designator create)
-  (build (link (typecase link-designator
-		 (link link-designator)
-		 (string (load-and-parse (make-hash-name :hash link-designator)))
-		 (cons (create-link-from-spec link-designator))))
-    (if create (save-leaf link))))
+(defun make-span-space-link (link-designator &optional do-not-save)
+  (build (link (link-to-span-space (coerce-to-link link-designator)))
+    (if (not do-not-save) (save-leaf link))))
+
+(defun coerce-to-link (link-designator)
+  (typecase link-designator
+    (link link-designator)
+    (string (load-and-parse (make-hash-name :hash link-designator)))
+    (cons (create-link-from-spec link-designator))))
 
 (defun check-start-and-length-bounds (start length doc-length name)
   (test-oob start "The start index (~A) is too large (max ~A for document ~A)"

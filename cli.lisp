@@ -107,7 +107,7 @@
 
 (defun cli-new-link (args)
   (check-argn args 1)
-  (let ((leaf (read-link (car args))))
+  (let ((leaf (link-to-span-space (read-link (car args)))))
     (save-leaf leaf)
     (cli-out (hash-name-hash (leaf-name leaf)))))
 

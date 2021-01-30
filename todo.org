@@ -12,5 +12,5 @@
 * DONE Imported file contents should go on the scroll
 * TODO Need some file existence error handling in the CLI (docs AND links)
 * TODO Exporting link information
-* TODO Links in all forms and APIs need to be mapped between spaces
+* DONE Links in all forms and APIs need to be mapped between spaces
 * TODO Bounds checking on numbers in CLI/API (e.g. removing link past end)
