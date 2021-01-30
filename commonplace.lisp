@@ -34,7 +34,7 @@
 
 (defmacro probe (form)
   (with-unique-names (val)
-    `(let ((,val ,form)) (format T ,(format nil "~A: ~~A~%" form) ,val) ,val)))
+    `(let ((,val ,form)) (format T ,(format nil "~A: ~~S~%" form) ,val) ,val)))
 
 (defmacro awhen (test &body body)
   `(let ((,(intern "IT") ,test))
@@ -408,16 +408,15 @@ parts that do"
 (defun create-link-from-spec (spec)
   (labels ((do-endsets (spec &optional name)
 	     (let ((x (car spec)))
-	       (cond
-		 ((keywordp x)
-		  (if name (error "Endset ~S has no contents" name))
-		  (do-endsets (cdr spec) x))
-		 ((stringp x) (cons (doc-endset name (parse-doc-name x))
-				    (do-endsets (cdr spec))))
-		 ((consp x) (cons (span-endset name (if (consp (car x))
-							(mapcar #'do-span x)
-							(list (do-span x))))
-				  (do-endsets (cdr spec)))))))
+	       (typecase x
+		 (keyword (if name (error "Endset ~S has no contents" name))
+			  (do-endsets (cdr spec) (string-downcase (symbol-name x))))
+		 (string (cons (doc-endset name (parse-doc-name x))
+			       (do-endsets (cdr spec))))
+		 (cons (cons (span-endset name (if (consp (car x))
+						   (mapcar #'do-span x)
+						   (list (do-span x))))
+			     (do-endsets (cdr spec)))))))
 	   (do-span (list)
 	     (if (not (= 3 (length list)))
 		 (error "Span requires origin, start and length only: ~S" list))
@@ -613,12 +612,7 @@ parts that do"
 		     :type type
 		     :spans (first spans-links)
 		     :links (second spans-links))))
-	((eq type :link)
-	 (let ((type-endsets (parse-link-contents contents)))
-	   (make-link :name name
-		      :owner owner
-		      :type (car type-endsets)
-		      :endsets (cdr type-endsets))))
+	((eq type :link) (parse-link name owner contents))
 	(T (make-content-leaf :name name
 			      :owner owner
 			      :contents contents))))))
@@ -665,6 +659,13 @@ parts that do"
 
 (defun parse-link-include (link-include-line)
   (load-and-parse (make-hash-name :hash  (subseq link-include-line 5))))
+
+(defun parse-link (name owner contents)
+  (let ((type-endsets (parse-link-contents contents)))
+	   (make-link :name name
+		      :owner owner
+		      :type (car type-endsets)
+		      :endsets (cdr type-endsets))))
 
 (defun parse-link-contents (link)
   (let ((parts (split-sequence #\; (subseq link 0 (1- (length link))))))
@@ -910,9 +911,11 @@ found"
       (transclude doc (doc-length doc) imported 54 188)
       (format T "Transcluded 188 characters poetry from ~A into ~A~%" imported doc)
       (format T "Adding quote link~%")
-      (add-link doc (link "quote"
-			  (doc-endset "origin" (parse-doc-name imported))
-			  (span-endset nil (list (span (resolve-doc-name doc) 38 188)))))
+      (let ((q (new-link
+		(link "quote"
+		      (doc-endset "origin" (parse-doc-name imported))
+		      (span-endset nil (list (span (resolve-doc-name doc) 38 188)))))))
+	(add-link doc q))
       (format T "Adding verse link using link spec with span~%")
       (add-link doc `("verse" :lines (,doc 38 188)))
       (format T "Adding doctext link using link spec with doc name~%")

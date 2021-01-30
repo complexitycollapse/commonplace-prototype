@@ -24,7 +24,9 @@
 	(handler-case
 	    (case verb
 	      (:init (cli-init rest))
-	      (:new (cli-new rest))
+	      (:new (check-argn args nil "type")
+		    (setf verb (concatenate 'string "new " (cadr rest)))
+		    (cli-new rest))
 	      (:append (cli-append rest))
 	      (:insert (cli-insert rest))
 	      (:delete (cli-delete rest))
@@ -32,6 +34,8 @@
 	      (:transclude (cli-transclude rest))
 	      (:import (cli-import rest))
 	      (:export (cli-export rest))
+	      (:link (cli-link rest))
+	      (:unlink (cli-unlink rest))
 	      (otherwise (cli-verb-not-recognised (car args))))
 	  (unrecognised-argument-error ()
 	    (cli-out "Unrecognised arguments to ~A." verb))
@@ -49,6 +53,11 @@
   (cli-out "Created new repository in ~A." (init (car args))))
 
 (defun cli-new (args)
+  (cond ((string= (car args) "doc") (cli-new-doc (cdr args)))
+	((string= (car args) "link") (cli-new-link (cdr args)))
+	(T (error 'unrecognised-argument-error))))
+
+(defun cli-new-doc (args)
   (check-argn args 0)
   (cli-out "Created ~A" (new-doc)))
 
@@ -96,6 +105,25 @@
   (let ((path (cadr args)))
     (export-text (car args) (or path T))))
 
+(defun cli-new-link (args)
+  (check-argn args 1)
+  (let ((leaf (read-link (car args))))
+    (save-leaf leaf)
+    (cli-out (hash-name-hash (leaf-name leaf)))))
+
+(defun cli-link (args)
+  (check-argn args 3 "document name" "link name")
+  (cond ((caddr args) (cli-insert-link args))
+	(T (cli-out (stringify (nth-value 1 (add-link (car args) (cadr args))))))))
+
+(defun cli-insert-link (args)
+  (check-argn args 3 "document name" "link name" "position")
+  (insert-link (car args) (cadr args) (safe-integer (caddr args) "position")))
+
+(defun cli-unlink (args)
+  (check-argn args 2 "document name" "link index")
+  (remove-link (car args) (safe-integer (cadr args) "link index")))
+
 ;;; Internal
 
 (defun cli-verb-not-recognised (verb)
@@ -105,9 +133,11 @@
   (apply #'format T format-string format-args)
   (fresh-line))
 
+(defun stringify (thing) (format nil "~A" thing))
+
 (defun check-argn (args max &rest names)
   (let ((len (length args)))
-    (if (> len max) (error 'unrecognised-argument-error))
+    (if (and max (> len max)) (error 'unrecognised-argument-error))
     (let ((missing (car (drop len names))))
       (if missing (error 'missing-argument-error :argument missing)))))
 
@@ -116,3 +146,6 @@
     (if (or (null val) (not (eq (length value) length)))
 	(error 'not-an-integer-error :argument arg-name :actual value)
 	val)))
+
+(defun read-link (link-arg)
+  (parse-link nil user+ (or link-arg (drain-string *standard-input*))))

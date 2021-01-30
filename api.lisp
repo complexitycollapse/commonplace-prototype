@@ -72,12 +72,18 @@
   (let ((doc (if (stringp doc-or-doc-name) (safe-load-doc doc-or-doc-name) doc-or-doc-name)))
     (length-sum (doc-spans doc))))
 
-(defun add-link (doc-or-doc-name link-or-spec)
-  (let ((link (coerce-to-link link-or-spec T)))
-    (with-safely-loaded-doc doc-or-doc-name (pushend link (doc-links doc)))))
+(defun new-link (link-or-spec) (hash-name-hash (leaf-name (coerce-to-link link-or-spec T))))
 
-(defun insert-link (doc-or-doc-name link-or-spec n)
-  (let ((link (coerce-to-link link-or-spec T)))
+(defun add-link (doc-or-doc-name link-designator)
+  (let ((link (coerce-to-link link-designator T))
+	(index 0))
+    (with-safely-loaded-doc doc-or-doc-name
+      (pushend link (doc-links doc))
+      (setf index (1- (length (doc-links doc)))))
+    (values link index)))
+
+(defun insert-link (doc-or-doc-name link-designator n)
+  (let ((link (coerce-to-link link-designator T)))
     (with-safely-loaded-doc doc-or-doc-name
       (check-link-bounds doc doc-or-doc-name n)
       (setf (doc-links doc) (insert-at link (doc-links doc) n)))))
@@ -103,9 +109,11 @@
 
 (defun leaf-exists (name) (not (leaf-missing (resolve-doc-name name))))
 
-(defun coerce-to-link (link-or-spec create)
-  (build (link
-	  (if (consp link-or-spec) (create-link-from-spec link-or-spec) link-or-spec))
+(defun coerce-to-link (link-designator create)
+  (build (link (typecase link-designator
+		 (link link-designator)
+		 (string (load-and-parse (make-hash-name :hash link-designator)))
+		 (cons (create-link-from-spec link-designator))))
     (if create (save-leaf link))))
 
 (defun check-start-and-length-bounds (start length doc-length name)

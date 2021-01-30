@@ -1,5 +1,5 @@
 * DONE Calculate signatures
-* TODO CLI
+* DONE CLI
 * DONE Move scratch out of "public"
 * TODO Figure out how to handle different types of data
 * TODO Write up markdown file
@@ -10,5 +10,7 @@
 * DONE API for links
 * TODO Base64 encoding doesn't work for UTF-8. Need to convert to binary properly
 * DONE Imported file contents should go on the scroll
-* TODO Need some file existence error handling in the CLI
+* TODO Need some file existence error handling in the CLI (docs AND links)
 * TODO Exporting link information
+* TODO Links in all forms and APIs need to be mapped between spaces
+* TODO Bounds checking on numbers in CLI/API (e.g. removing link past end)
