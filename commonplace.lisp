@@ -429,21 +429,22 @@ parts that do"
 	     (apply #'span (resolve-doc-name (car list)) (cdr list))))
     (apply #'link (car spec) (do-endsets (cdr spec)))))
 
-(defun link-to-span-space (link &optional (cache (make-cache)))
-  (apply #'link (link-type link) (mapcar (lambda (e) (endset-to-span-space e cache))
-					 (link-endsets link))))
+(defun remap-link-spans (link replace-fn)
+  (apply #'link
+	 (link-type link)
+	 (mapcar (lambda (e) (if (span-endset-p e) (replace-spans-in-endset replace-fn e) e))
+		 (link-endsets link))))
 
-(defun endset-to-span-space (endset &optional (cache (make-cache)))
-  (if (doc-endset-p endset) endset
-      (span-endset
-       (span-endset-name endset)
-       (merge-all
-	(apply #'append
-	       (mapcar (lambda (s)
-			 (crop (doc-spans (get-from-cache (origin s) cache))
-					(start s)
-					(len s)))
-		       (span-endset-spans endset)))))))
+(defun replace-spans-in-endset (replace-fn endset)
+  (span-endset (span-endset-name endset)
+	       (merge-all (apply #'append (mapcar (lambda (s) (funcall replace-fn s))
+						  (span-endset-spans endset))))))
+
+(defun link-to-span-space (link &optional (cache (make-cache)))
+  (remap-link-spans link (lambda (s)
+			   (crop (doc-spans (get-from-cache (origin s) cache))
+				 (start s)
+				 (len s)))))
 
 ;;;; Scrolls and publishing
 
