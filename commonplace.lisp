@@ -84,15 +84,13 @@
 ;;; Span operations
 
 (defun span (origin start length) (make-span :origin origin :start start :len length))
-
 (defun edit-span (span &key (origin (origin span)) (start (start span)) (len (len span)))
   (span origin start len))
-
 (defun next-pos (s) (+ (start s) (len s)))
-
 (defun span-end (s) (1- (next-pos s)))
-
 (defun same-origin (s1 s2) (equalp (origin s1) (origin s2)))
+(defun span-diff (fn s1 s2 &optional (offset 0))
+  (+ offset (- (funcall fn s1) (funcall fn s2))))
 
 (defun span-contains (span point &optional (adjustment 0))
   (let ((offset (- point (start span) adjustment)))
@@ -222,14 +220,14 @@
 parts that do"
   (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
       (collecting
-       (let ((length (- (start i) (start s))))
+       (let ((length (span-diff #'start i s)))
 	 (if (> length 0) (collect (edit-span s :len length)))
 	 (let ((start (max (start s) (start i))))
 	   (collect
 	       (funcall fn (edit-span s :start start
 				      :len (- (min (next-pos s) (next-pos i)) start))
 			length))))
-       (let ((length (- (span-end s) (span-end i))))
+       (let ((length (span-diff #'span-end s i)))
 	 (if (> length 0) (collect (edit-span s :start (next-pos i) :len length)))))))
 
 (defun append-new-text (doc text)
