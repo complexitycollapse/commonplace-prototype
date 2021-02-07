@@ -117,8 +117,7 @@
 	(list (span (origin s1) start (- (max (next-pos s1) (next-pos s2)) start))))
       (list s1 s2)))
 
-(defun length-sum (spans)
-  (if (endp spans) 0 (+ (len (car spans)) (length-sum (cdr spans)))))
+(defun length-sum (spans) (reduce #'+ spans :key #'len))
 
 (define-condition point-out-of-bounds-error (error)
   ((point :initarg :point)
