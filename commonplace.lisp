@@ -15,6 +15,8 @@
 (defstruct endset name)
 (defstruct (span-endset (:include endset)) spans)
 (defstruct (doc-endset (:include endset)) doc-name)
+(defstruct (concatalink (:conc-name ccl-)) type endsets)
+(defstruct (concatatext-endset (:include endset) (:conc-name cce-)) spans)
 
 (defparameter local-scroll-name+ (make-scroll-name :scroll "local"))
 (defparameter scratch-name+ (make-scratch-name))
@@ -404,8 +406,9 @@ parts that do"
   (make-doc-endset :name name :doc-name (if (doc-p doc-or-doc-name) (doc-name doc-or-doc-name)
 					    doc-or-doc-name)))
 (defun span-endset (name spans) (make-span-endset :name name :spans spans))
+(defun cc-endset (name spans) (make-concatatext-endset :name name :spans spans))
 
-(defun create-link-from-spec (spec)
+(defun create-cclink-from-spec (spec)
   (labels ((do-endsets (spec &optional name)
 	     (let ((x (car spec)))
 	       (typecase x
@@ -413,9 +416,9 @@ parts that do"
 			  (do-endsets (cdr spec) (string-downcase (symbol-name x))))
 		 (string (cons (doc-endset name (parse-doc-name x))
 			       (do-endsets (cdr spec))))
-		 (cons (cons (span-endset name (if (consp (car x))
-						   (mapcar #'do-span x)
-						   (list (do-span x))))
+		 (cons (cons (cc-endset name (if (consp (car x))
+						 (mapcar #'do-span x)
+						 (list (do-span x))))
 			     (do-endsets (cdr spec)))))))
 	   (do-span (list)
 	     (if (not (= 3 (length list)))
@@ -427,24 +430,30 @@ parts that do"
 	     (if (not (integerp (third list)))
 		 (error "Length must be an integer: ~S" (third list)))
 	     (apply #'span (resolve-doc-name (car list)) (cdr list))))
-    (apply #'link (car spec) (do-endsets (cdr spec)))))
+    (make-concatalink :type (car spec) :endsets (do-endsets (cdr spec)))))
 
-(defun remap-link-spans (link replace-fn)
+(defun remap-link-spans (link span-predicate replace-fn)
   (apply #'link
-	 (link-type link)
-	 (mapcar (lambda (e) (if (span-endset-p e) (replace-spans-in-endset replace-fn e) e))
-		 (link-endsets link))))
+	 (ccl-type link)
+	 (mapcar (lambda (e) (if (funcall span-predicate e)
+				 (make-span-endset-from-cc-endset replace-fn e)
+				 e))
+		 (ccl-endsets link))))
 
-(defun replace-spans-in-endset (replace-fn endset)
-  (span-endset (span-endset-name endset)
+(defun make-span-endset-from-cc-endset (replace-fn cc-endset)
+  (span-endset (cce-name cc-endset)
 	       (merge-all (apply #'append (mapcar (lambda (s) (funcall replace-fn s))
-						  (span-endset-spans endset))))))
+						  (cce-spans cc-endset))))))
 
-(defun link-to-span-space (link &optional (cache (make-cache)))
-  (remap-link-spans link (lambda (s)
-			   (crop (doc-spans (get-from-cache (origin s) cache))
-				 (start s)
-				 (len s)))))
+(defun coerce-to-link (link &optional (cache (make-cache)))
+  (typecase link
+    (link link)
+    (concatalink (remap-link-spans link #'concatatext-endset-p
+		    (lambda (s)
+		      (crop (doc-spans (get-from-cache (origin s) cache))
+			    (start s)
+			    (len s)))))
+    (T (error "Could not coerce to link: ~S" link))))
 
 ;;;; Scrolls and publishing
 
@@ -660,23 +669,29 @@ parts that do"
   (load-and-parse (make-hash-name :hash  (subseq link-include-line 5))))
 
 (defun parse-link (name owner contents)
-  (let ((type-endsets (parse-link-contents contents)))
+  (let ((type-endsets (parse-link-contents contents nil)))
 	   (make-link :name name
 		      :owner owner
 		      :type (car type-endsets)
 		      :endsets (cdr type-endsets))))
 
-(defun parse-link-contents (link)
-  (let ((parts (split-sequence #\; (subseq link 0 (1- (length link))))))
-    (cons (car parts) (mapcar #'parse-endset (cdr parts)))))
+(defun parse-cclink (contents)
+  (let ((type-endsets (parse-link-contents contents T)))
+    (make-concatalink :type (car type-endsets) :endsets (cdr type-endsets))))
 
-(defun parse-endset (endset)
+(defun parse-link-contents (link as-cclink)
+  (let ((parts (split-sequence #\; (subseq link 0 (1- (length link))))))
+    (cons (car parts) (mapcar (lambda (e) (parse-endset e as-cclink)) (cdr parts)))))
+
+(defun parse-endset (endset as-cclink)
   (let* ((name-and-contents (split-sequence #\# endset))
 	 (name (if (cdr name-and-contents) (car name-and-contents)))
 	 (contents (if (cdr name-and-contents) (cadr name-and-contents)
 		       (car name-and-contents))))
     (cond ((string-starts-with "span:" contents)
-           (make-span-endset :name name :spans (parse-span-endset-spans contents)))
+	   (if as-cclink
+               (make-concatatext-endset :name name :spans (parse-span-endset-spans contents))
+	       (make-span-endset :name name :spans (parse-span-endset-spans contents))))
 	  ((string-starts-with "doc:" contents)
            (make-doc-endset :name name :doc-name (parse-doc-ref contents)))
 	  (T (error "Could not understand endset '~S'" contents)))))

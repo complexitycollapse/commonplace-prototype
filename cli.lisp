@@ -107,7 +107,7 @@
 
 (defun cli-new-link (args)
   (check-argn args 1)
-  (let ((leaf (link-to-span-space (read-link (car args)))))
+  (let ((leaf (coerce-to-link (read-cclink (car args)))))
     (save-leaf leaf)
     (cli-out (hash-name-hash (leaf-name leaf)))))
 
@@ -147,5 +147,4 @@
 	(error 'not-an-integer-error :argument arg-name :actual value)
 	val)))
 
-(defun read-link (link-arg)
-  (parse-link nil user+ (or link-arg (drain-string *standard-input*))))
+(defun read-cclink (link-arg) (parse-cclink (or link-arg (drain-string *standard-input*))))

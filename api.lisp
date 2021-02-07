@@ -111,14 +111,16 @@
 (defun leaf-exists (name) (not (leaf-missing (resolve-doc-name name))))
 
 (defun make-span-space-link (link-designator &optional do-not-save)
-  (build (link (link-to-span-space (coerce-to-link link-designator)))
+  (build (link (coerce-to-link (process-link-designator link-designator)))
     (if (not do-not-save) (save-leaf link))))
 
-(defun coerce-to-link (link-designator)
+(defun process-link-designator (link-designator)
   (typecase link-designator
     (link link-designator)
+    (concatalink link-designator)
     (string (load-and-parse (make-hash-name :hash link-designator)))
-    (cons (create-link-from-spec link-designator))))
+    (cons (create-cclink-from-spec link-designator))
+    (T (error "Invalid link designator ~S" link-designator))))
 
 (defun check-start-and-length-bounds (start length doc-length name)
   (test-oob start "The start index (~A) is too large (max ~A for document ~A)"
