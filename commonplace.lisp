@@ -392,7 +392,7 @@ parts that do"
 
 ;;; Links
 
-(defun link (type &rest endsets) (make-link :owner user+ :type type :endsets endsets))
+(defun link (type endsets) (make-link :owner user+ :type type :endsets endsets))
 (defun doc-endset (name doc-or-doc-name)
   (make-doc-endset :name name :doc-name (if (doc-p doc-or-doc-name) (doc-name doc-or-doc-name)
 					    doc-or-doc-name)))
@@ -424,12 +424,10 @@ parts that do"
     (make-concatalink :type (car spec) :endsets (do-endsets (cdr spec)))))
 
 (defun remap-link-spans (link span-predicate replace-fn)
-  (apply #'link
-	 (ccl-type link)
-	 (mapcar (lambda (e) (if (funcall span-predicate e)
-				 (make-span-endset-from-cc-endset replace-fn e)
-				 e))
-		 (ccl-endsets link))))
+  (mapcar (lambda (e) (if (funcall span-predicate e)
+			  (make-span-endset-from-cc-endset replace-fn e)
+			  e))
+	  (ccl-endsets link)))
 
 (defun make-span-endset-from-cc-endset (replace-fn cc-endset)
   (span-endset (cce-name cc-endset)
@@ -439,11 +437,12 @@ parts that do"
 (defun coerce-to-link (link &optional (cache (make-cache)))
   (typecase link
     (link link)
-    (concatalink (remap-link-spans link #'concatatext-endset-p
-		    (lambda (s)
-		      (crop (doc-spans (get-from-cache (origin s) cache))
-			    (start s)
-			    (len s)))))
+    (concatalink (link (ccl-type link)
+		       (remap-link-spans link #'concatatext-endset-p
+					 (lambda (s)
+					   (crop (doc-spans (get-from-cache (origin s) cache))
+						 (start s)
+						 (len s))))))
     (T (error "Could not coerce to link: ~S" link))))
 
 ;;; Scrolls and publishing
@@ -911,8 +910,9 @@ found"
       (format T "Adding quote link~%")
       (let ((q (new-link
 		(link "quote"
-		      (doc-endset "origin" (parse-doc-name imported))
-		      (span-endset nil (list (span (resolve-doc-name doc) 38 188)))))))
+		      (list
+		       (doc-endset "origin" (parse-doc-name imported))
+		       (span-endset nil (list (span (resolve-doc-name doc) 38 188))))))))
 	(add-link doc q))
       (format T "Adding verse link using link spec with span~%")
       (add-link doc `("verse" :lines (,doc 38 188)))
