@@ -44,7 +44,11 @@
 	  (not-an-integer-error (e)
 	    (cli-out "~A argument must be an integer, was ~A."
 		     (slot-value e 'argument)
-		     (slot-value e 'actual)))))))
+		     (slot-value e 'actual)))
+	  (link-index-out-of-bounds-error (e)
+	    (cli-out "Link index (~A) is out of bounds (max ~A)"
+		     (slot-value e 'index)
+		     (slot-value e 'max)))))))
 
 ;;; CLI verbs
 

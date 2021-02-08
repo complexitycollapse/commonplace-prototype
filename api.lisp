@@ -68,9 +68,7 @@
 	     (with-open-file (s output-filename :direction :output :if-exists :supersede)
 	       (princ text s)))))))
 
-(defun doc-length (doc-or-doc-name)
-  (let ((doc (if (stringp doc-or-doc-name) (safe-load-doc doc-or-doc-name) doc-or-doc-name)))
-    (length-sum (doc-spans doc))))
+(defun doc-length (doc-or-doc-name) (length-sum (doc-spans (safe-load-doc doc-or-doc-name))))
 
 (defun new-link (link-or-spec)
   (hash-name-hash (leaf-name (make-span-space-link link-or-spec))))
@@ -86,19 +84,23 @@
 (defun insert-link (doc-or-doc-name link-designator n)
   (let ((link (make-span-space-link link-designator)))
     (with-safely-loaded-doc doc-or-doc-name
-      (check-link-bounds doc doc-or-doc-name n)
-      (setf (doc-links doc) (insert-at link (doc-links doc) n)))))
+      (let* ((links (doc-links doc))
+	     (max (length (doc-links doc))))
+	(if (> n max) (error 'link-index-out-of-bounds-error :index n :max max))
+	(setf (doc-links doc) (insert-at link links n))))))
 
 (defun remove-link (doc-or-doc-name n)
   (with-safely-loaded-doc doc-or-doc-name
-    (check-link-bounds doc doc-or-doc-name (1- n))
-    (let ((links (doc-links doc)))
+    (let* ((links (doc-links doc))
+	   (max (1- (length (doc-links doc)))))
+      (if (> n max) (error 'link-index-out-of-bounds-error :index n :max max))
       (setf (doc-links doc) (remove (nth n links) links :test #'equalp)))))
 
 (defun safe-load-doc (name)
-  (let ((hash (if (hash-name-p name) name (resolve-doc-name name))))
-    (if (leaf-missing hash) (error "No leaf has the name ~A" name))
-    (load-and-parse hash)))
+  (if (doc-p name) name
+      (let ((hash (if (hash-name-p name) name (resolve-doc-name name))))
+	(if (leaf-missing hash) (error "No leaf has the name ~A" name))
+	(load-and-parse hash))))
 
 (defun f-with-safely-loaded-doc (doc-or-doc-name fn)
   (let* ((doc (typecase doc-or-doc-name
@@ -129,7 +131,11 @@
 	    "The lenth to delete (~A) is too long (only ~A characters afer start ~A)"
 	    length (- doc-length start) start))
 
-(defun check-link-bounds (doc name n)
-  (if (> n (length (doc-links doc)))
-      (error "Link index (~A) is out of bounds (max ~A for document ~A)"
-	n (length (doc-links doc)) name)))
+(define-condition link-index-out-of-bounds-error (error)
+  ((index :initarg :index)
+   (max :initarg :max)))
+
+(defmethod print-object ((object link-index-out-of-bounds-error) stream)
+  (print-unreadable-object (object stream :type t :identity t)
+    (format stream "Link index (~A) is out of bounds (max ~A)"
+	    (slot-value object 'index) (slot-value object 'max))))
