@@ -463,13 +463,10 @@ parts that do"
     (let* ((span-for-scroll (span scratch-name+ (length scratch-contents) length)))
       (with-open-file (s scratch-path :direction :output :if-exists :append)
 	(princ content s))
-      (let ((scroll-position (get-next-local-scroll-pos)))
+      (let ((scroll-position (length-sum (doc-spans scroll))))
 	(setf (doc-spans scroll) (merge-span-lists (doc-spans scroll) (list span-for-scroll)))
 	(save-leaf scroll)
 	(span local-scroll-name+ scroll-position length)))))
-
-(defun get-next-local-scroll-pos ()
-  (apply #'+ (mapcar #'len (doc-spans (load-and-parse local-scroll-name+)))))
 
 (defun migrate-scroll-spans-to-scroll-targets (doc scroll-spans)
   (replace-spans doc (lambda (s)
