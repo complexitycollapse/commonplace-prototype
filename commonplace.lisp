@@ -32,7 +32,7 @@
 (defvar http-stream*) ; used by the HTTP client to represent an open connection
 (defvar repo-path* (sb-posix:getcwd)) ; defaults to current directory
 
-;;;; Common functions
+;;; Common functions
 
 (defmacro probe (form)
   (with-unique-names (val)
@@ -233,7 +233,7 @@ parts that do"
 (defun append-new-text (doc text)
   (pushend (append-to-local-scroll text) (doc-spans doc)))
 
-;;;; Document names
+;;; Document names
 
 (defun generate-doc-name-string ()
   (let ((name (ironclad:byte-array-to-hex-string
@@ -261,7 +261,7 @@ parts that do"
 
 (defun delete-doc-name (name) (delete-file (get-doc-name-path name)))
 
-;;;; Leaf names
+;;; Leaf names
 
 (defmethod get-path-extensions ((name doc-name))
   (error "Cannot convert doc name to path name: ~S" name))
@@ -307,7 +307,7 @@ parts that do"
   (make-doc-name :main (doc-name-main old-name)
 		 :version (format nil "~A" (1+ (parse-integer (doc-name-version old-name))))))
 
-;;;; Leaf operations
+;;; Leaf operations
 
 (defmethod leaf-type ((leaf content-leaf)) :content)
 (defmethod leaf-type ((leaf link)) :link)
@@ -356,12 +356,6 @@ parts that do"
 (defun make-new-version (doc)
   (new-doc-leaf (doc-spans doc) (doc-links doc)))
 
-(defun load-contents-of-file (path)
-  "Import text from a file"
-  (build (contents (make-fillable-string))
-    (with-open-file (s path)
-      (loop for c = (read-char s nil) while c do (vector-push-extend c contents)))))
-
 (defun load-all-contents (spans &optional (cache (make-cache)))
   (dolist (a (mapcar #'origin spans))
     (when (not (in-cache a cache))
@@ -384,7 +378,7 @@ parts that do"
 	(generate-concatatext-clip (doc-spans contents) (start span) (len span) contents-hash)
 	(subseq (content-leaf-contents contents) (start span) (next-pos span)))))
 
-;;;; Leaf cache
+;;; Leaf cache
 
 (defun make-cache () (make-hash-table :test 'equalp))
 
@@ -396,7 +390,7 @@ parts that do"
       (setf value (load-and-parse name))
       (setf (gethash name cache) value))))
 
-;;;; Links
+;;; Links
 
 (defun link (type &rest endsets) (make-link :owner user+ :type type :endsets endsets))
 (defun doc-endset (name doc-or-doc-name)
@@ -452,7 +446,7 @@ parts that do"
 			    (len s)))))
     (T (error "Could not coerce to link: ~S" link))))
 
-;;;; Scrolls and publishing
+;;; Scrolls and publishing
 
 (defun scroll-span-p (span)
   (equal (origin span) local-scroll-name+))
@@ -534,20 +528,18 @@ parts that do"
       (setf (leaf-name new-scroll) local-scroll-name+)
       (save-leaf new-scroll))))
 
-;;;; Ugly file processing stuff
-;;;; (get rid of this and do it properly!)
+;;; File processing
 
-(defun make-fillable-string ()
-  (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
+(defun read-stream-content-into-string (stream &key (buffer-size 4096))
+  (let ((*print-pretty* nil))
+    (with-output-to-string (datum)
+      (let ((buffer (make-array buffer-size :element-type 'character)))
+        (loop
+          :for bytes-read = (read-sequence buffer stream)
+          :do (write-sequence buffer datum :start 0 :end bytes-read)
+          :while (= bytes-read buffer-size))))))
 
-(defun drain (stream constructor)
-  (do ((c (read-char stream nil :eof) (read-char stream nil :eof)))
-	  ((eq c :eof))
-	(funcall constructor c)))
-
-(defun drain-string (stream)
-  (build (str (make-fillable-string))
-    (drain stream (lambda (c) (vector-push-extend c str)))))
+(defun drain (stream) (read-stream-content-into-string stream))
 
 ;;; Repo management
 
@@ -587,10 +579,9 @@ parts that do"
     leaf))
 
 (defun load-by-name (name)
-  (build (file (make-fillable-string))
-    (with-open-file (s (name-to-path name) :if-does-not-exist nil)
-      (if (null s) (return-from load-by-name nil))
-      (drain s (lambda (c) (vector-push-extend c file))))))
+  (with-open-file (s (name-to-path name) :if-does-not-exist nil)
+    (if (null s) (return-from load-by-name nil))
+    (drain s)))
 
 (defun save-by-name (name contents)
   (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
@@ -599,16 +590,15 @@ parts that do"
 (defun leaf-missing (name)
   (not (probe-file (name-to-path name))))
 
-;;;; Parsing leaves
+;;; Parsing leaves
 
 (defun parse-vector (v name)
   (with-input-from-string (s v)
     (let* ((type (parse-type (read-line s)))
 	   (owner (read-line s))
 	   (content-separator (read-line s))
-	   (contents (make-fillable-string)))
+	   (contents (drain s)))
       (assert (string= content-separator "-"))
-      (drain s (lambda (c) (vector-push-extend c contents)))
       (cond
 	((represents-doc-p type)
 	 (let* ((spans-links (parse-doc-contents contents)))
@@ -699,7 +689,7 @@ parts that do"
 
 (defun parse-doc-ref (doc) (parse-doc-name (subseq doc 4)))
 
-;;;; Serializing leaves
+;;; Serializing leaves
 
 (defun serialize-leaf (leaf)
   (concatenate 'string (serialize-leaf-header leaf)
@@ -819,7 +809,7 @@ found"
       (200 body)
       (otherwise (error "Server returned ~A, reason:'~A'" status-code reason-phrase)))))
 
-;;;; Base64
+;;; Base64
 
 (defun encode-sextet (s)
   (cond ((< s 26) (code-char (+ 65 s)))
@@ -855,7 +845,7 @@ found"
 (defun safe-char-code (c) (if c (char-code c)))
 
 (defun base64-encode-octets (octets)
-  (build (arr (make-fillable-string))
+  (build (arr (make-array '(0) :element-type 'character :adjustable T :fill-pointer 0))
     (let ((pos 0))
       (labels ((pull () (if (>= pos (length octets)) nil
 			    (prog1 (aref octets pos) (incf pos)))))
@@ -878,7 +868,7 @@ found"
 	   for d = (pull)
 	   do (dolist (x (decode-chars a b c d)) (vector-push-extend x arr)))))))
 
-;;;; Signatures
+;;; Signatures
 
 (defun get-digest-for-string (str)
 					; TODO handle non-ASCII text
@@ -905,7 +895,7 @@ found"
 (defun create-hash (leaf-string &optional (length default-hash-length+))
   (subseq (ironclad:byte-array-to-hex-string (get-digest-for-string leaf-string)) 0 length))
 
-;;;; Test repo
+;;; Test repo
 
 (defun recreate-test-repo ()
   (set-test-repo)

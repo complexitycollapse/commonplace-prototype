@@ -65,7 +65,7 @@
   (check-argn args 2 "name")
   (let ((name (car args))
 	(text (cadr args)))
-    (if (null text) (setf text (drain-string *standard-input*)))
+    (if (null text) (setf text (drain *standard-input*)))
     (cli-out (append-text name text))))
 
 (defun cli-insert (args)
@@ -73,7 +73,7 @@
   (let ((name (car args))
 	(position (cadr args))
 	(text (caddr args)))
-    (if (null text) (setf text (drain-string *standard-input*)))
+    (if (null text) (setf text (drain *standard-input*)))
     (cli-out (insert-text name (safe-integer position "position") text))))
 
 (defun cli-delete (args)
@@ -147,4 +147,4 @@
 	(error 'not-an-integer-error :argument arg-name :actual value)
 	val)))
 
-(defun read-cclink (link-arg) (parse-cclink (or link-arg (drain-string *standard-input*))))
+(defun read-cclink (link-arg) (parse-cclink (or link-arg (drain *standard-input*))))

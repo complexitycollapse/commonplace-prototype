@@ -55,7 +55,7 @@
       (delete-doc-name name))))
 
 (defun import-file (path &optional name)
-  (let ((contents (load-contents-of-file path)))
+  (let ((contents (alexandria:read-file-into-string path)))
     (build (doc-name (new-doc name))
       (append-text doc-name contents))))
 
