@@ -10,9 +10,10 @@
 * DONE API for links
 * TODO Base64 encoding doesn't work for UTF-8. Need to convert to binary properly
 * DONE Imported file contents should go on the scroll
-* TODO Need some file existence error handling in the CLI (docs AND links)
+* DONE Need some file existence error handling in the CLI (docs AND links)
 * TODO Exporting link information
 * DONE Links in all forms and APIs need to be mapped between spaces
-* TODO Bounds checking on numbers in CLI/API (e.g. removing link past end)
+* DONE Bounds checking on numbers in CLI/API (e.g. removing link past end)
 * TODO Test the publishing mechanism
 * DONE Fixing the terrible file handling
+* TODO Documentation strings

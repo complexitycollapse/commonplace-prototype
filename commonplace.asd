@@ -10,5 +10,6 @@
 			     :alexandria)
   :components ((:file "packages")
                (:file "commonplace")
+	       (:file "conditions")
 	       (:file "api")
 	       (:file "cli")))

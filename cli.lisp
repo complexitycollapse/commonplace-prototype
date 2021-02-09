@@ -2,10 +2,7 @@
 
 (in-package :commonplace)
 
-(define-condition unrecognised-argument-error (error) ())
-(define-condition missing-argument-error (error) ((argument :initarg :argument)))
-(define-condition not-an-integer-error (error) ((argument :initarg :argument)
-						(actual :initarg :actual)))
+(defvar current-cli-verb*)
 
 (defun make-exe ()
   (sb-ext:save-lisp-and-die "commonplace" :toplevel #'executable-start :executable T))
@@ -21,34 +18,26 @@
   (if (endp args) (cli-out "Missing command line arguments.")
       (let ((verb (make-keyword (car args)))
 	    (rest (cdr args)))
-	(handler-case
-	    (case verb
-	      (:init (cli-init rest))
-	      (:new (check-argn args nil "type")
-		    (setf verb (concatenate 'string "new " (cadr rest)))
-		    (cli-new rest))
-	      (:append (cli-append rest))
-	      (:insert (cli-insert rest))
-	      (:delete (cli-delete rest))
-	      (:move (cli-move rest))
-	      (:transclude (cli-transclude rest))
-	      (:import (cli-import rest))
-	      (:export (cli-export rest))
-	      (:link (cli-link rest))
-	      (:unlink (cli-unlink rest))
-	      (otherwise (cli-verb-not-recognised (car args))))
-	  (unrecognised-argument-error ()
-	    (cli-out "Unrecognised arguments to ~A." verb))
-	  (missing-argument-error (e)
-	    (cli-out "Missing ~A argument to ~A." (slot-value e 'argument) verb))
-	  (not-an-integer-error (e)
-	    (cli-out "~A argument must be an integer, was ~A."
-		     (slot-value e 'argument)
-		     (slot-value e 'actual)))
-	  (link-index-out-of-bounds-error (e)
-	    (cli-out "Link index (~A) is out of bounds (max ~A)"
-		     (slot-value e 'index)
-		     (slot-value e 'max)))))))
+	(let ((current-cli-verb* verb))
+	  (declare (special current-cli-verb*))
+	  (handler-case
+	      (case verb
+		(:init (cli-init rest))
+		(:new (check-argn args nil "type")
+		      (setf verb (concatenate 'string "new " (cadr rest)))
+		      (cli-new rest))
+		(:append (cli-append rest))
+		(:insert (cli-insert rest))
+		(:delete (cli-delete rest))
+		(:move (cli-move rest))
+		(:transclude (cli-transclude rest))
+		(:import (cli-import rest))
+		(:export (cli-export rest))
+		(:link (cli-link rest))
+		(:unlink (cli-unlink rest))
+		(otherwise (cli-verb-not-recognised (car args))))
+	    (commonplace-error (e)
+	      (let ((*print-escape* nil)) (cli-out "~A" e))))))))
 
 ;;; CLI verbs
 
@@ -59,7 +48,7 @@
 (defun cli-new (args)
   (cond ((string= (car args) "doc") (cli-new-doc (cdr args)))
 	((string= (car args) "link") (cli-new-link (cdr args)))
-	(T (error 'unrecognised-argument-error))))
+	(T (error 'unrecognised-argument-error :verb current-cli-verb*))))
 
 (defun cli-new-doc (args)
   (check-argn args 0)
@@ -141,14 +130,16 @@
 
 (defun check-argn (args max &rest names)
   (let ((len (length args)))
-    (if (and max (> len max)) (error 'unrecognised-argument-error))
+    (if (and max (> len max)) (error 'unrecognised-argument-error :verb current-cli-verb*))
     (let ((missing (car (drop len names))))
-      (if missing (error 'missing-argument-error :argument missing)))))
+      (if missing
+	  (error 'missing-argument-error :argument missing :verb current-cli-verb*)))))
 
 (defun safe-integer (value arg-name)
   (multiple-value-bind (val length) (parse-integer value :junk-allowed T)
-    (if (or (null val) (not (eq (length value) length)))
-	(error 'not-an-integer-error :argument arg-name :actual value)
-	val)))
+    (cond ((or (null val) (not (eq (length value) length)))
+	   (error 'not-an-integer-error :argument arg-name :actual value))
+	  ((< val 0) (error 'negative-integer-error :argument arg-name :actual val))
+	  (T val))))
 
 (defun read-cclink (link-arg) (parse-cclink (or link-arg (drain *standard-input*))))

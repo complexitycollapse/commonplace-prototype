@@ -75,8 +75,9 @@
 (defun insert-at (x list n)
   (if (zerop n) (cons x list) (cons (car list) (insert-at x (cdr list) (1- n)))))
 
-(defun make-keyword (x)
-  (intern (string-upcase (with-output-to-string (s) (princ x s))) (symbol-package :x)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun make-keyword (x)
+    (intern (string-upcase (with-output-to-string (s) (princ x s))) (symbol-package :x))))
 
 (defmacro build ((name constructor) &body body)
   `(let ((,name ,constructor)) ,@body ,name))
@@ -564,8 +565,7 @@ parts that do"
     (save-leaf (make-content-leaf :name scratch-name+ :owner user+))
     repo-path*))
 
-(defun load-and-parse (name)
-  (parse-vector (load-by-name name) name))
+(defun load-and-parse (name) (parse-leaf (load-by-name name) name))
 
 (defun save-leaf (leaf)
   (let ((serialized (serialize-leaf leaf))
@@ -575,7 +575,7 @@ parts that do"
     leaf))
 
 (defun load-by-name (name)
-  (with-open-file (s (name-to-path name) :if-does-not-exist nil)
+  (with-open-file (s (name-to-path name) :if-does-not-exist :error)
     (if (null s) (return-from load-by-name nil))
     (drain s)))
 
@@ -583,12 +583,11 @@ parts that do"
   (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
     (princ contents s)))
 
-(defun leaf-missing (name)
-  (not (probe-file (name-to-path name))))
+(defun leaf-missing (name) (not (probe-file (name-to-path name))))
 
 ;;; Parsing leaves
 
-(defun parse-vector (v name)
+(defun parse-leaf (v name)
   (with-input-from-string (s v)
     (let* ((type (parse-type (read-line s)))
 	   (owner (read-line s))
@@ -649,7 +648,9 @@ parts that do"
 	  (read-from-string (subseq (third parts) 7)))))
 
 (defun parse-link-include (link-include-line)
-  (load-and-parse (make-hash-name :hash  (subseq link-include-line 5))))
+  (let ((name (subseq link-include-line 5)))
+    (handler-case (load-and-parse (make-hash-name :hash name))
+      (file-error () (error 'leaf-not-found :type :leaf :name name)))))
 
 (defun parse-link (name owner contents)
   (let ((type-endsets (parse-link-contents contents nil)))
@@ -785,7 +786,7 @@ found"
   (with-http-client
     (let ((doc (ensure-leaf doc-name T force-download)))
       (when doc
-	(ensure-leaves (mapcar #'origin (doc-spans (parse-vector doc doc-name)))
+	(ensure-leaves (mapcar #'origin (doc-spans (parse-leaf doc doc-name)))
 		       force-download)))))
 
 (defun get-leaf-from-server (name keep-alive)

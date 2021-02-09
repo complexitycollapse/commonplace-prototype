@@ -15,8 +15,10 @@
 				    (doc-spans doc)
 				    doc-length))))
 
-(defmacro test-oob (val format-string &rest format-args)
-  `(if (> ,val doc-length) (error ,format-string ,@format-args)))
+(defmacro test-oob (val arg-name doc-name)
+  `(if (> ,val doc-length)
+       (error 'text-position-too-large-error
+	      :position ,val :max doc-length :arg-name ,arg-name :doc-name ,doc-name)))
 
 (defun new-doc (&optional name) (new-doc-name (leaf-name (save-leaf (new-doc-leaf))) name))
 
@@ -25,27 +27,25 @@
 
 (defun insert-text (name point text)
   (modify-spans name
-    (test-oob point "The insert point (~A) is too large (max ~A for document ~A)"
-	      point doc-length name)
+    (test-oob point "insert point" name)
     (insert-spans spans (list (append-to-local-scroll text)) point)))
 
 (defun delete-text (name start length)
   (modify-spans name
-    (check-start-and-length-bounds start length doc-length name)
+    (check-start-and-length-bounds start length doc-length name "delete")
     (delete-spans spans start length)))
 
 (defun move-text (name start length new-pos)
   (modify-spans name
-    (test-oob start "The start index (~A) is too large (max ~A for document ~A)"
-	      start doc-length name)
+    (test-oob start "start point" name)
     (move-spans spans start length new-pos)))
 
 (defun transclude (destination-name insert-point source-name start length)
   (modify-spans destination-name
-    (test-oob insert-point "The insert-point (~A) is too large (max ~A for document ~A)"
-	      insert-point doc-length destination-name)
+    (test-oob insert-point "insert point" destination-name)
     (let ((source (safe-load-doc source-name)))
-      (check-start-and-length-bounds start length (doc-length source) source-name)
+      (check-start-and-length-bounds
+       start length (doc-length source) source-name "transclude")
       (transclude-spans (doc-spans source) start length spans insert-point))))
 
 (defun delete-leaf (name)
@@ -98,8 +98,10 @@
 
 (defun safe-load-doc (name)
   (if (doc-p name) name
-      (let ((hash (if (hash-name-p name) name (resolve-doc-name name))))
-	(if (leaf-missing hash) (error "No leaf has the name ~A" name))
+      (let ((hash
+	     (handler-case (if (hash-name-p name) name (resolve-doc-name name))
+	       (file-error () (error 'no-doc-with-that-name :name name)))))
+	(if (leaf-missing hash) (error 'leaf-not-found :type :doc :name hash))
 	(load-and-parse hash))))
 
 (defun f-with-safely-loaded-doc (doc-or-doc-name fn)
@@ -120,22 +122,13 @@
   (typecase link-designator
     (link link-designator)
     (concatalink link-designator)
-    (string (load-and-parse (make-hash-name :hash link-designator)))
+    (string (handler-case (load-and-parse (make-hash-name :hash link-designator))
+	      (file-error () (error 'leaf-not-found :name link-designator :type :link))))
     (cons (create-cclink-from-spec link-designator))
     (T (error "Invalid link designator ~S" link-designator))))
 
-(defun check-start-and-length-bounds (start length doc-length name)
-  (test-oob start "The start index (~A) is too large (max ~A for document ~A)"
-	    start doc-length name)
-  (test-oob (+ start length)
-	    "The lenth to delete (~A) is too long (only ~A characters afer start ~A)"
-	    length (- doc-length start) start))
-
-(define-condition link-index-out-of-bounds-error (error)
-  ((index :initarg :index)
-   (max :initarg :max)))
-
-(defmethod print-object ((object link-index-out-of-bounds-error) stream)
-  (print-unreadable-object (object stream :type t :identity t)
-    (format stream "Link index (~A) is out of bounds (max ~A)"
-	    (slot-value object 'index) (slot-value object 'max))))
+(defun check-start-and-length-bounds (start length doc-length name action)
+  (test-oob start "start" name)
+  (if (> (+ start length) doc-length)
+      (error 'excessive-length-error :length (+ start length) :max (- doc-length start)
+	     :start start :action action)))
