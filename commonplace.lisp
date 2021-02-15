@@ -98,19 +98,29 @@
     (and (>= offset 0) (< offset (len span)))))
 
 (defun overlapping-p (s1 s2 &key (adjust1 0) (adjust2 0))
+  "True if the spans contain any shared content. The spans may be position shifted by :adjust1
+and :adjust2 if specified."
   (not (or (< (+ (span-end s1) adjust1) (+ (start s2) adjust2))
 	   (< (+ (span-end s2) adjust2) (+ (start s1) adjust1)))))
 
 (defun abutting-p (s1 s2)
+  "True if span s2 follows span s1 with no gap between them."
   (eq (next-pos s1) (start s2)))
 
 (defun mergeable-p (s1 s2)
+  "True if spans s1 and s2 could be merged into a single contiguous span containing the
+contents of both."
   (and (same-origin s1 s2) (or (overlapping-p s1 s2) (abutting-p s1 s2))))
 
 (defun duplicating-p (s1 s2)
+  "True if spans s1 and s2 share any content (i.e. there is some data contained in both of
+them)."
   (and (same-origin s1 s2) (overlapping-p s1 s2)))
 
 (defun merge-spans (s1 s2 &optional only-overlaps)
+  "Attempts to merge two spans into one, returning a list of results (either one span or
+the two originals). If :only-overlaps is true, they will only be merged if they duplicate some
+content, not if they merely abut each other."
   (if (if only-overlaps (duplicating-p s1 s2) (mergeable-p s1 s2))
       (let ((start (min (start s1) (start s2))))
 	(list (span (origin s1) start (- (max (next-pos s1) (next-pos s2)) start))))
@@ -120,16 +130,22 @@
 
 (define-condition point-out-of-bounds-error (error)
   ((point :initarg :point)
-   (spans :initarg :spans)))
+   (spans :initarg :spans))
+  (:documentation "Raised whenever a span operation is passed an out of bounds point argument
+(i.e. a point value that does not lie within the list of spans that the operation is being
+performed on)."))
 
 (defmethod print-object ((object point-out-of-bounds-error) stream)
   (print-unreadable-object (object stream :type t :identity t)
     (format stream "P~S SPANS:~S" (slot-value object 'point) (slot-value object 'spans))))
 
 (defun out-of-bounds (point spans)
+  "Helper method that raises an point-out-of-bounds error."
   (error 'point-out-of-bounds-error :point point :spans spans))
 
 (defun divide-span-at-point (s1 point)
+  "Split a span into two at the given point, returning a list of the resulting spans. If the
+given point lies outside the span then the returned list contains only the original span."
   (with-slots (start length) s1
     (if (and (span-contains s1 point) (> point (start s1)))
 	(list (edit-span s1 :len (- point start))
@@ -137,12 +153,17 @@
 	(list s1))))
 
 (defun divide-span (s length)
+  "Divide a span into two, with the first being the given length and the second being the
+remainder. Results are returned as a list. If there is no remainder then the list contains
+only the original span."
   (if (or (zerop length) (>= length (len s)))
       (list s)
       (list (edit-span s :len length)
 	    (edit-span s :start (+ (start s) length) :len (- (len s) length)))))
 
 (defun merge-span-lists (list1 list2)
+  "Take two lists of spans and concatenate them, merging the spans at the join point into one
+if possible. The inverse operation of SPLIT-SPANS-AT."
   (cond
     ((endp list1) list2)
     ((endp list2) list1)
@@ -150,21 +171,23 @@
 	 (append (cdr lifted) (merge-spans (car lifted) (car list2)) (cdr list2))))))
 
 (defun merge-all (list)
-  "Merge all spans that abut or overlap"
+  "Merge all adjacent spans that abut or overlap."
   (if (endp (cdr list)) list
       (let ((merged (merge-spans (car list) (cadr list))))
 	(if (cadr merged) (cons (car list) (merge-all (cdr list)))
 	    (merge-all (cons (car merged) (cddr list)))))))
 
 (defun deduplicate (list)
-  "Merge all spans that overlap (i.e. duplicate a portion of each other's content"
+  "Merge all adjacent spans that overlap (i.e. duplicate a portion of each other's content).
+This differs from MERGE-ALL in that it won't merge spans if they merely abut."
   (if (endp (cdr list)) list
       (let ((merged (merge-spans (car list) (cadr list) T)))
 	(if (cadr merged) (cons (car list) (deduplicate (cdr list)))
 	    (deduplicate (cons (car merged) (cddr list)))))))
 
 (defun split-spans-at (list point)
-  "Divide a list of spans into two list at the given point (included in the second list)"
+  "Divide a list of spans into two list at the given point (with the second list inclusive of
+the point itself)."
   (labels
       ((split (s l p collected)
 	 (cond ((zerop p) (list (nreverse collected) (if s (cons s l) l)))
@@ -177,7 +200,7 @@
     (split (car list) (cdr list) point nil)))
 
 (defun split-twice (list start length)
-  "Divide a list of span into three, with the central section having given start and length"
+  "Divide a list of span into three, with the central section having given start and length."
   (let ((div (split-spans-at list start)))
     (cons (car div) (split-spans-at (cadr div) length))))
 
@@ -186,16 +209,17 @@
   (second (split-twice spans start length)))
 
 (defun insert-spans (spans new-spans point)
-  "Insert a list of spans into the middle of some existing spans."
+  "Return a list of spans with some new spans inserted into an old list."
   (let ((div (split-spans-at spans point)))
     (merge-span-lists (car div) (merge-span-lists new-spans (cadr div)))))
 
 (defun delete-spans (spans start length)
-  "Remove a section from some spans."
+  "Construct a new list of spans with a section removed."
   (let ((div (split-twice spans start length)))
     (merge-span-lists (first div) (third div))))
 
 (defun move-spans (spans start length new-pos)
+  "Move a section from one place to another."
   (let ((div (split-twice spans start length)))
     (insert-spans (merge-span-lists (first div) (third div)) (second div) new-pos)))
 
@@ -204,12 +228,15 @@
   (insert-spans target-spans (crop source-spans start length) insert-point))
 
 (defun find-span (spans point)
+  "Find the span that encompasses the given point. Returns NIL if not found."
   (recur (spans pos) (spans 0)
     (cond ((endp spans) nil)
 	  ((span-contains (car spans) point pos) (values (car spans) pos))
 	  (T (recur (cdr spans) (+ pos (len (car spans))))))))
 
 (defun get-concatatext-position (spans point-origin point &optional (pos 0))
+  "Finds the first position of some content represented by POINT-ORIGIN and POINT within a
+list of spans."
   (with-slots (origin start len) (car spans)
     (cond ((endp spans) nil)
 	  ((and (equal origin point-origin) (span-contains (car spans) point))
@@ -232,11 +259,13 @@ parts that do"
 	 (if (> length 0) (collect (edit-span s :start (next-pos i) :len length)))))))
 
 (defun append-new-text (doc text)
+  "Append new text to the end of a document. The text will be stored on the local scroll."
   (pushend (append-to-local-scroll text) (doc-spans doc)))
 
 ;;; Document names
 
 (defun generate-doc-name-string ()
+  "Generate a name string for a new document. Currently this is just a random string."
   (let ((name (ironclad:byte-array-to-hex-string
 	       (map-into (make-array '(3)) (lambda () (random 256))))))
     (if (probe-file (get-doc-name-path name))
@@ -246,17 +275,22 @@ parts that do"
 (defun get-doc-name-path (name) (repo-path "names/" name))
 
 (defun new-doc-name (version-name &optional pre-chosen-name)
+  "Create a new doc name in the repository and associate it with the given version. The name
+is random. Specifying a name with PRE-CHOSEN-NAME is an internal feature intended to support
+predictable testing."
   (build (name (or pre-chosen-name (generate-doc-name-string)))
     (with-open-file (s (get-doc-name-path name)
 		       :direction :output :if-does-not-exist :create :if-exists :error)
       (princ (hash-name-hash version-name) s))))
 
 (defun update-doc-name (name new-hash)
+  "Repoint a doc name to a new doc hash."
   (with-open-file (s (get-doc-name-path name)
 		     :direction :output :if-does-not-exist :error :if-exists :overwrite)
       (princ (hash-name-hash new-hash) s)))
 
 (defun resolve-doc-name (name)
+  "Resolve a doc name to the hash it names."
   (with-open-file (s (get-doc-name-path name) :if-does-not-exist :error)
     (make-hash-name :hash (read-line s))))
 
@@ -315,10 +349,12 @@ parts that do"
 (defmethod leaf-type ((leaf doc)) (doc-type leaf))
 
 (defun iterate-doc (doc on-clip on-link)
+  "Iterate over the clips and links in a doc, calling the specified functions on each item."
   (mapc on-clip (doc-spans doc))
   (mapc on-link (doc-links doc)))
 
 (defun iterate-spans (doc on-span)
+  "Call ON-SPAN on all the spans in a doc, whether they are in clips or links."
   (iterate-doc doc on-span (lambda (l)
 			     (dolist (e (link-endsets l))
 			       (if (span-endset-p e)
@@ -326,6 +362,8 @@ parts that do"
 				     (funcall on-span s)))))))
 
 (defun replace-spans (doc new-span-fn)
+  "Calls NEW-SPAN-FN on each span in a document (in both clips and links) and replaces the
+span with the list of spans returned."
   (multiple-value-bind (clips links)
       (with-collectors (clips links)
 	(iterate-doc
@@ -349,34 +387,31 @@ parts that do"
 (defun editable-p (leaf) (and (leaf-name leaf) (not (hash-name-p (leaf-name leaf)))))
 
 (defun new-content-leaf (text)
+  "Create a new content leaf holding the given text."
   (make-content-leaf :owner user+ :contents text))
 
 (defun new-doc-leaf (&optional spans links)
+  "Create a new document leaf with the given spans and links."
   (make-doc :owner user+ :type :doc :spans spans :links links))
 
-(defun make-new-version (doc)
-  (new-doc-leaf (doc-spans doc) (doc-links doc)))
-
 (defun load-all-contents (spans &optional (cache (make-cache)))
+  "Load all the leaves refered to by the given spans into a cache."
   (dolist (a (mapcar #'origin spans))
     (when (not (in-cache a cache))
       (let ((doc (get-from-cache a cache)))
 	(if (scroll-name-p a) (load-all-contents (doc-spans doc) cache)))))
   cache)
 
-(defun generate-concatatext (spans &optional (contents-hash (load-all-contents spans)))
-  (apply #'concatenate 'string (mapcar (lambda (s) (apply-span s contents-hash)) spans)))
+(defun generate-concatatext (spans &optional (cache (load-all-contents spans)))
+  "Generate the concatatext of the given spans. The concatatext is the assembled content
+defined by the spans. It is created by concatenating the content referred to by each span."
+  (apply #'concatenate 'string (mapcar (lambda (s) (apply-span s cache)) spans)))
 
-(defun generate-concatatext-clip (spans start length
-				  &optional (contents-hash (load-all-contents spans)))
-    (apply #'concatenate 'string
-	 (mapcar (lambda (s) (apply-span s contents-hash)) (crop spans start length))))
-
-(defun apply-span (span contents-hash)
-  "Extract the text of a span from a collection of contents leaves."
-  (let ((contents (gethash (origin span) contents-hash)))
+(defun apply-span (span &optional (cache (make-cache)))
+  "Extract the text referred to by a span."
+  (let ((contents (get-from-cache (origin span) cache)))
     (if (scroll-name-p (origin span))
-	(generate-concatatext-clip (doc-spans contents) (start span) (len span) contents-hash)
+	(generate-concatatext (crop (doc-spans contents) (start span) (len span)) cache)
 	(subseq (content-leaf-contents contents) (start span) (next-pos span)))))
 
 ;;; Leaf cache
@@ -401,6 +436,7 @@ parts that do"
 (defun cc-endset (name spans) (make-concatatext-endset :name name :spans spans))
 
 (defun create-cclink-from-spec (spec)
+  "Create a concatalink object from a tree representation of the link."
   (labels ((do-endsets (spec &optional name)
 	     (let ((x (car spec)))
 	       (typecase x
@@ -425,17 +461,22 @@ parts that do"
     (make-concatalink :type (car spec) :endsets (do-endsets (cdr spec)))))
 
 (defun remap-link-spans (link span-predicate replace-fn)
+  "Helper function for rewriting spans in a link to a different form (such as moving then
+between namespaces."
   (mapcar (lambda (e) (if (funcall span-predicate e)
 			  (make-span-endset-from-cc-endset replace-fn e)
 			  e))
 	  (ccl-endsets link)))
 
 (defun make-span-endset-from-cc-endset (replace-fn cc-endset)
+  "Convert a concatalink endset to a span endset."
   (span-endset (cce-name cc-endset)
 	       (merge-all (apply #'append (mapcar (lambda (s) (funcall replace-fn s))
 						  (cce-spans cc-endset))))))
 
 (defun coerce-to-link (link &optional (cache (make-cache)))
+  "Convert LINK to a link. Link may be a link (in which case it is returned unchanged) or a
+concatalink (in which case it is remapped to a span link)."
   (typecase link
     (link link)
     (concatalink (link (ccl-type link)
@@ -469,13 +510,21 @@ parts that do"
 	(span local-scroll-name+ scroll-position length)))))
 
 (defun migrate-scroll-spans-to-scroll-targets (doc scroll-spans)
+  "Takes a doc and the list of spans that make up a scroll, and converts all spans in the doc
+that reference the scroll to spans that reference the scroll's contents."
   (replace-spans doc (lambda (s)
 		       (if (scroll-span-p s) (crop scroll-spans (start s) (len s)) s))))
 
 (defun get-scratch-spans (doc)
+  "Get all spans in a doc referencing the scratch file."
   (collecting (iterate-spans doc (lambda (s) (if (scratch-span-p s) (collect s))))))
 
 (defun build-map-from-scratch-spans (spans)
+  "Used when migrating content from the scratch file to a leaf. The list of spans referring
+to the scratch file are rewritten such that overlapping spans are combined into one. The
+resulting spans are in a similar order to the original spans, but will no duplicated content.
+This list of spans can then be used to generate a new leaf containing all the scratch
+content."
   (let ((deduped (deduplicate (sort (copy-list spans) #'< :key #'start))))
     (collecting
       (dolist (s spans)
@@ -484,10 +533,16 @@ parts that do"
 	  (setf deduped (remove it deduped)))))))
 
 (defun create-leaf-from-map (map)
+  "Take a map created by BUILD-MAP-FROM-SCRATCH-SPANS and generate its concatatext as a new
+leaf. Find the hash name of the new leaf immediately so it can be used in the rest of the
+publishing process."
   (build (leaf (new-content-leaf (generate-concatatext map)))
     (set-hash-name leaf (serialize-leaf leaf))))
 
 (defun migrate-scratch-spans-to-leaf (doc map leaf-name)
+  "Rewrite scratch spans so that they refer to the contents of LEAF-NAME. The MAP argument
+describes the original scratch positions of the contents in the new leaf and should be
+created by BUILD-MAP-FROM-SCRATCH-SPANS."
   (replace-spans
    doc
    (lambda (s)
@@ -497,7 +552,10 @@ parts that do"
 	       (len s))
 	 s))))
 
-(defun rewrite-scratch-span (span map pos leaf-name)
+(defun rewrite-scratch-span (span map leaf-name &optional (pos 0))
+  "Attempt to convert a span referring to scratch to a new span referring to LEAF-NAME, using
+the given MAP (created by BUILD-MAP-FROM-SCRATCH-SPANS) as a guide to where the contents can
+be found in the leaf."
   (cond ((endp map) (list span))
 	(T (mapcan (lambda (s)
 		     (rewrite-scratch-span
@@ -508,9 +566,23 @@ parts that do"
 		    (lambda (x p) (span leaf-name (+ pos p) (len x))))))))
 
 (defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
-  (mapcan (lambda (s) (rewrite-scratch-span s map 0 leaf-name)) scroll-spans))
+  (mapcan (lambda (s) (rewrite-scratch-span s map leaf-name)) scroll-spans))
 
 (defun publish (doc)
+  "Take a doc and convert it to a publishable form. The is achieved by the following
+operations:
+
+    1. All contents referred to by the doc that are in the scratch file are migrated to a
+       permanent home in a new leaf.
+
+    2. The local scroll is updated to refer to this new leaf instead of the scratch file.
+
+    3. All references to the local scroll in the document are replaced by references to the
+       leaves that hold the content.
+
+The concatatext and links of the document should be unchanged, but the doc is internally
+rewritten to reference only the permanent homes of the contents, rather than the scrols they
+originated from."
   (let* ((scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
 	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc scroll-spans))
 	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch)))
@@ -528,6 +600,8 @@ parts that do"
 ;;; File processing
 
 (defun read-stream-content-into-string (stream &key (buffer-size 4096))
+  "Use DRAIN rather than using this directly, as hopefully it will eventually be replaced by
+the implementation in ALEXANDRIA."
   (let ((*print-pretty* nil))
     (with-output-to-string (datum)
       (let ((buffer (make-array buffer-size :element-type 'character)))
@@ -536,7 +610,9 @@ parts that do"
           :do (write-sequence buffer datum :start 0 :end bytes-read)
           :while (= bytes-read buffer-size))))))
 
-(defun drain (stream) (read-stream-content-into-string stream))
+(defun drain (stream)
+  "Read the contents of a text file into a string."
+  (read-stream-content-into-string stream))
 
 ;;; Repo management
 
@@ -552,6 +628,7 @@ parts that do"
 (defun name-to-path (name) (apply #'repo-path (get-path-extensions name)))
 
 (defun init (&optional new-dir-name)
+  "Initialize a new repo called NEW-DIR-NAME in the current directory."
   (let ((repo-path*
 	 (if new-dir-name
 	     (cl-fad:merge-pathnames-as-directory

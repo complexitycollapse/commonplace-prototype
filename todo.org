@@ -16,4 +16,4 @@
 * DONE Bounds checking on numbers in CLI/API (e.g. removing link past end)
 * TODO Test the publishing mechanism
 * DONE Fixing the terrible file handling
-* TODO Documentation strings
+* DONE Documentation strings
