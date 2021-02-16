@@ -128,6 +128,10 @@ content, not if they merely abut each other."
 
 (defun length-sum (spans) (reduce #'+ spans :key #'len))
 
+(defun position-alist (spans)
+  "Returns an alist of the given SPANS, keyed by their position in the concatatext."
+  (let ((pos 0)) (mapcar (lambda (s) (cons pos (progn (incf pos (len s)) s))) spans)))
+
 (define-condition point-out-of-bounds-error (error)
   ((point :initarg :point)
    (spans :initarg :spans))
@@ -486,6 +490,25 @@ concatalink (in which case it is remapped to a span link)."
 						 (start s)
 						 (len s))))))
     (T (error "Could not coerce to link: ~S" link))))
+
+(defun coerce-to-cclink (link doc-spans)
+  (typecase link
+    (concatalink link)
+    (link (make-concatalink
+	   :type (link-type link)
+	   :endsets (remap-link-spans
+		     link
+		     #'span-endset-p
+		     (lambda (s) (map-span-to-document-locations s doc-spans)))))
+    (T (error "Could not coerce to concatalink: ~A" link))))
+
+(defun map-span-to-document-locations (span doc-spans)
+  (collecting
+      (loop :for s :in doc-spans :for p = 0 :then (+ p (len s))
+	 :do (transform-intersection span s
+				     (lambda (i) (collect (span (origin i) (span-diff #'start i s p) (len i))))
+				     )
+	   )))
 
 ;;; Scrolls and publishing
 
