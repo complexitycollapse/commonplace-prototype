@@ -246,17 +246,18 @@ list of spans."
 	  (T (get-concatatext-position (cdr spans) point-origin point (+ pos len))))))
 
 (defun transform-intersection (s i fn)
-  "Breaks s into a list of spans according to which parts overlap with i, calling fn on the
-parts that do"
+  "Breaks S into a list of spans according to which parts overlap with I, calling FN on the
+parts that do. FN takes two arguments: the span representing the intersection and the offset
+of this into I."
   (if (not (and (same-origin s i) (overlapping-p s i))) (list s)
       (collecting
        (let ((length (span-diff #'start i s)))
-	 (if (> length 0) (collect (edit-span s :len length)))
-	 (let ((start (max (start s) (start i))))
-	   (collect
-	       (funcall fn (edit-span s :start start
-				      :len (- (min (next-pos s) (next-pos i)) start))
-			length))))
+	 (if (> length 0) (collect (edit-span s :len length))))
+       (let ((start (max (start s) (start i))))
+	 (collect
+	     (funcall fn (edit-span s :start start
+				    :len (- (min (next-pos s) (next-pos i)) start))
+		      (- start (start i)))))
        (let ((length (span-diff #'span-end s i)))
 	 (if (> length 0) (collect (edit-span s :start (next-pos i) :len length)))))))
 
@@ -476,8 +477,8 @@ between namespaces."
 (defun make-span-endset-from-cc-endset (replace-fn cc-endset)
   "Convert a concatalink endset to a span endset."
   (span-endset (cce-name cc-endset)
-	       (merge-all (apply #'append (mapcar (lambda (s) (funcall replace-fn s))
-						  (cce-spans cc-endset))))))
+	       (merge-all (mapcan (lambda (s) (funcall replace-fn s))
+				  (cce-spans cc-endset)))))
 
 (defun coerce-to-link (link &optional (cache (make-cache)))
   "Convert LINK to a link. Link may be a link (in which case it is returned unchanged) or a
@@ -494,11 +495,8 @@ concatalink (in which case it is remapped to a span link)."
 
 ;;; Scrolls and publishing
 
-(defun scroll-span-p (span)
-  (equal (origin span) local-scroll-name+))
-
-(defun scratch-span-p (span)
-  (equal (origin span) scratch-name+))
+(defun scroll-span-p (span) (equalp (origin span) local-scroll-name+))
+(defun scratch-span-p (span) (equalp (origin span) scratch-name+))
 
 (defun append-to-local-scroll (content)
   "Append some content to the local private scroll and return the span representing it."
@@ -561,19 +559,15 @@ created by BUILD-MAP-FROM-SCRATCH-SPANS."
   "Attempt to convert a span referring to scratch to a new span referring to LEAF-NAME, using
 the given MAP (created by BUILD-MAP-FROM-SCRATCH-SPANS) as a guide to where the contents can
 be found in the leaf."
-  (cond ((endp map) (list span))
-	(T (mapcan (lambda (s)
-		     (rewrite-scratch-span
-		      s (cdr map) (+ pos (len (car map))) leaf-name))
-		   (transform-intersection
-		    span
-		    (car map)
-		    (lambda (x p) (span leaf-name (+ pos p) (len x))))))))
+  (if (endp map) nil
+      (cons (transform-intersection span (car map) (lambda (x p)
+						     (span leaf-name (+ pos (- p)) (len x))))
+	    (rewrite-scratch-span span (cdr map) leaf-name (+ pos (len (car map)))))))
 
 (defun migrate-scroll-spans-to-leaf (scroll-spans map leaf-name)
-  (mapcan (lambda (s) (rewrite-scratch-span s map leaf-name)) scroll-spans))
+  (mapcan (lambda (s) (apply #'nconc (rewrite-scratch-span s map leaf-name))) scroll-spans))
 
-(defun publish (doc)
+(defun publish (doc-or-doc-name)
   "Take a doc and convert it to a publishable form. The is achieved by the following
 operations:
 
@@ -588,7 +582,11 @@ operations:
 The concatatext and links of the document should be unchanged, but the doc is internally
 rewritten to reference only the permanent homes of the contents, rather than the scrols they
 originated from."
-  (let* ((scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
+  (let* ((update-name (stringp doc-or-doc-name))
+	 (doc (if (stringp doc-or-doc-name)
+		  (load-and-parse (resolve-doc-name doc-or-doc-name))
+		  doc-or-doc-name))
+	 (scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
 	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc scroll-spans))
 	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch))))
     (when (endp map) ; if we don't need to create a new leaf then we are done
@@ -601,6 +599,7 @@ originated from."
 	    (migrate-scroll-spans-to-leaf scroll-spans map (leaf-name new-leaf))))
       (save-leaf new-leaf)
       (save-leaf fully-migrated)
+      (if update-name (update-doc-name doc-or-doc-name (leaf-name fully-migrated)))
       (let ((new-scroll (new-doc-leaf migrated-scroll-spans nil)))
 	(setf (leaf-name new-scroll) local-scroll-name+)
 	(save-leaf new-scroll)))))
@@ -981,7 +980,9 @@ found"
 
 (defun recreate-test-repo ()
   (labels ((out (format-string &rest args)
-	     (apply #'format T (concatenate 'string format-string "~%") args)))
+	     (apply #'format T (concatenate 'string format-string "~%") args))
+	   (ctext (name)
+	     (generate-concatatext (doc-spans (load-and-parse (resolve-doc-name name))))))
     (set-test-repo)
     (cl-fad:delete-directory-and-files repo-path* :if-does-not-exist :ignore)
     (init)
@@ -1021,7 +1022,7 @@ found"
     (out "~%Now time to test publishing!")
     (let ((s1 (new-doc "source1"))
 	  (s2 (new-doc "source2"))
-	  (s3 (new-doc "to-publish")))
+	  (s3 (new-doc "source3")))
       (out "Appending content to first doc")
       (append-text s1 "First")
       (out "Transcluding content into second doc")
@@ -1030,4 +1031,20 @@ found"
       (append-text s2 "Second")
       (out "Transcluding both into third doc")
       (transclude s3 0 s1 0 5)
-      (transclude s3 5 s2 0 11))))
+      (transclude s3 5 s2 0 11)
+      (out "Publishing first doc")
+      (publish s1)
+      (assert (string= "First" (ctext s1)))
+      (assert (string= "FirstSecond" (ctext s2)))
+      (assert (string= "FirstSecond" (ctext s3)))
+      (out "Publishing second doc")
+      (publish s2)
+      (assert (string= "FirstSecond" (ctext s2)))
+      (assert (string= "FirstSecond" (ctext s3)))
+      (out "Publishing third doc")
+      (let ((s3-hash (resolve-doc-name s3)))
+	(publish s3)
+	(assert (equalp s3-hash (resolve-doc-name s3)))
+      (assert (string= "First" (ctext s1)))
+      (assert (string= "FirstSecond" (ctext s2)))
+      (assert (string= "FirstSecond" (ctext s3)))))))

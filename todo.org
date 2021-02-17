@@ -14,6 +14,6 @@
 * TODO Exporting link information
 * DONE Links in all forms and APIs need to be mapped between spaces
 * DONE Bounds checking on numbers in CLI/API (e.g. removing link past end)
-* TODO Test the publishing mechanism
+* DONE Test the publishing mechanism
 * DONE Fixing the terrible file handling
 * DONE Documentation strings
