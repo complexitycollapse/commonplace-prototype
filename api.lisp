@@ -18,7 +18,8 @@ the document's spans, and updates the document with the spans returned by BODY."
      (setf (doc-spans doc) (funcall (lambda (spans doc-length)
 				      (declare (ignorable doc-length)) ,@body)
 				    (doc-spans doc)
-				    doc-length))))
+				    doc-length))
+     doc))
 
 (defmacro test-oob (val arg-name doc-name)
   "Check whether a position VAL is out of bounds for the given document. If so, a
@@ -31,6 +32,11 @@ TEXT-POSITIOH-TO-LARGE error is signalled, referening the given ARG-NAME."
   "Create a new document with a randomly generated name. The name is returned. (NOTE: the
 NAME parameter should not be used. It is strictly for testing purposes.)"
   (new-doc-name (leaf-name (save-leaf (new-doc-leaf))) name))
+
+(defun fork-doc (existing-doc-name &optional new-doc-name)
+  "Create a new name for an existing document version. (NOTE: the NAME parameter should not be
+used. It is strictly for testing purposes."
+  (with-safely-loaded-doc existing-doc-name (new-doc-name (leaf-name doc) new-doc-name)))
 
 (defun append-text (name text)
   "Append the given TEXT to the end of a document."
@@ -102,12 +108,10 @@ document, whose name is returned."
   "Add a link to the given document. If the LINK-DESIGNATOR is an existing link then that will
 be added. Otherwise a new link is created as specified by the designator. The link will be
 appended to the end of the document's links."
-  (let ((link (make-span-space-link link-designator))
-	(index 0))
+  (let ((link (make-span-space-link link-designator)))
     (with-safely-loaded-doc doc-or-doc-name
       (pushend link (doc-links doc))
-      (setf index (1- (length (doc-links doc)))))
-    (values link index)))
+      (values link (1- (length (doc-links doc)))))))
 
 (defun insert-link (doc-or-doc-name link-designator n)
   "Same behaviour as ADD-LINK, except the link is added to the document's link list at the
@@ -143,10 +147,11 @@ problems."
   "See WITH-SAFELY-LOADED-DOC."
   (let* ((doc (typecase doc-or-doc-name
 		(doc doc-or-doc-name)
-		(otherwise (safe-load-doc doc-or-doc-name)))))
-    (funcall fn doc (doc-length doc))
+		(otherwise (safe-load-doc doc-or-doc-name))))
+	 (result (multiple-value-list (funcall fn doc (doc-length doc)))))
     (if (stringp doc-or-doc-name)
-	(update-doc-name doc-or-doc-name (leaf-name (save-leaf doc))))))
+	(update-doc-name doc-or-doc-name (leaf-name (save-leaf doc))))
+    (values-list result)))
 
 (defun leaf-exists (name) (not (leaf-missing (resolve-doc-name name))))
 

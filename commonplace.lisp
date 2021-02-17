@@ -196,8 +196,10 @@ the point itself)."
 		(let ((split (divide-span s p)))
 		  (list (nreverse (cons (car split) collected)) (cons (cadr split) l))))
 	       (T (split (car l) (cdr l) (- p (len s)) (cons s collected))))))
-    (if (endp list) (out-of-bounds point list))
-    (split (car list) (cdr list) point nil)))
+
+    (cond ((zerop point) (list nil list))
+	  ((endp list) (out-of-bounds point list))
+	  (T (split (car list) (cdr list) point nil)))))
 
 (defun split-twice (list start length)
   "Divide a list of span into three, with the central section having given start and length."
@@ -436,7 +438,10 @@ defined by the spans. It is created by concatenating the content referred to by 
 (defun cc-endset (name spans) (make-concatatext-endset :name name :spans spans))
 
 (defun create-cclink-from-spec (spec)
-  "Create a concatalink object from a tree representation of the link."
+  "Create a concatalink object from a tree representation of the link. The tree must be of the
+form (type &rest endsets) where each endset is either a string representing a document name, a
+list representing a span with format (origin start length), or a keyword, which creates a
+named endset whose name is the keyword whose content is the next item in the list."
   (labels ((do-endsets (spec &optional name)
 	     (let ((x (car spec)))
 	       (typecase x
@@ -585,17 +590,20 @@ rewritten to reference only the permanent homes of the contents, rather than the
 originated from."
   (let* ((scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
 	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc scroll-spans))
-	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch)))
-	 (new-leaf (create-leaf-from-map map))
-	 (fully-migrated
-	  (migrate-scratch-spans-to-leaf migrated-to-scratch map (leaf-name new-leaf)))
-	 (migrated-scroll-spans
-	  (migrate-scroll-spans-to-leaf scroll-spans map (leaf-name new-leaf))))
-    (save-leaf new-leaf)
-    (save-leaf fully-migrated)
-    (let ((new-scroll (new-doc-leaf migrated-scroll-spans nil)))
-      (setf (leaf-name new-scroll) local-scroll-name+)
-      (save-leaf new-scroll))))
+	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch))))
+    (when (endp map) ; if we don't need to create a new leaf then we are done
+      (save-leaf migrated-to-scratch)
+      (return-from publish))
+    (let* ((new-leaf (create-leaf-from-map map))
+	   (fully-migrated
+	    (migrate-scratch-spans-to-leaf migrated-to-scratch map (leaf-name new-leaf)))
+	   (migrated-scroll-spans
+	    (migrate-scroll-spans-to-leaf scroll-spans map (leaf-name new-leaf))))
+      (save-leaf new-leaf)
+      (save-leaf fully-migrated)
+      (let ((new-scroll (new-doc-leaf migrated-scroll-spans nil)))
+	(setf (leaf-name new-scroll) local-scroll-name+)
+	(save-leaf new-scroll)))))
 
 ;;; File processing
 
@@ -972,33 +980,54 @@ found"
 ;;; Test repo
 
 (defun recreate-test-repo ()
-  (set-test-repo)
-  (cl-fad:delete-directory-and-files repo-path* :if-does-not-exist :ignore)
-  (init)
-  (build (doc (new-doc "test-doc"))
-    (format T "Created doc ~A~%" doc)
-    (append-text doc "0123456789")
-    (format T "Appended text '0123456789' to ~A~%" doc)
-    (append-text doc (format nil "ABCDEFGHIJKLMNOPQRSTUVWXYZ~%~%"))
-    (format T "Appended text 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' to ~A~%" doc)
-    (let ((imported (import-file (repo-path "../" "elegy.txt") "elegy")))
-      (format T "Imported poetry as ~A~%" imported)
-      (transclude doc (doc-length doc) imported 54 188)
-      (format T "Transcluded 188 characters poetry from ~A into ~A~%" imported doc)
-      (format T "Adding quote link~%")
-      (let ((q (new-link
-		(link "quote"
-		      (list
-		       (doc-endset "origin" (parse-doc-name imported))
-		       (span-endset nil (list (span (resolve-doc-name doc) 38 188))))))))
-	(add-link doc q))
-      (format T "Adding verse link using link spec with span~%")
-      (add-link doc `("verse" :lines (,doc 38 188)))
-      (format T "Adding doctext link using link spec with doc name~%")
-      (add-link doc `("doctest" ,imported))
-      (format T "Inserting 'insertedAt2' link~%")
-      (insert-link doc `("insertedAt2" ,imported) 2)
-      (format T "Inserting and deleting link~%")
-      (insert-link doc `("toBeDeleted" , imported) 1)
-      (remove-link doc 1)
-      (format T "~A~%" (export-text doc (repo-path "test-doc-output.txt"))))))
+  (labels ((out (format-string &rest args)
+	     (apply #'format T (concatenate 'string format-string "~%") args)))
+    (set-test-repo)
+    (cl-fad:delete-directory-and-files repo-path* :if-does-not-exist :ignore)
+    (init)
+    (build (doc (new-doc "test-doc"))
+      (out "Created doc ~A" doc)
+      (append-text doc "0123456789")
+      (out "Appended text '0123456789' to ~A" doc)
+      (append-text doc (format nil "ABCDEFGHIJKLMNOPQRSTUVWXYZ~%~%"))
+      (out "Appended text 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' to ~A" doc)
+      (let ((imported (import-file (repo-path "../" "elegy.txt") "elegy")))
+	(out "Imported poetry as ~A" imported)
+	(transclude doc (doc-length doc) imported 54 188)
+	(out "Transcluded 188 characters poetry from ~A into ~A" imported doc)
+	(out "Adding quote link")
+	(let ((q (new-link
+		  (link "quote"
+			(list
+			 (doc-endset "origin" (parse-doc-name imported))
+			 (span-endset nil (list (span (resolve-doc-name doc) 38 188))))))))
+	  (add-link doc q))
+	(out "Adding verse link using link spec with span")
+	(add-link doc `("verse" :lines (,doc 38 188)))
+	(out "Adding doctext link using link spec with doc name")
+	(add-link doc `("doctest" ,imported))
+	(out "Inserting 'insertedAt2' link")
+	(insert-link doc `("insertedAt2" ,imported) 2)
+	(out "Inserting and deleting link")
+	(insert-link doc `("toBeDeleted" ,imported) 1)
+	(remove-link doc 1)
+	(out "~A" (export-text doc (repo-path "test-doc-output.txt"))))
+      (out "~%Fork test")
+      (let ((fork-name (fork-doc doc "fork")))
+	(out "test-doc forked. Checking new name refers to current test-doc version...")
+	(assert (string= (hash-name-hash (resolve-doc-name fork-name))
+			 (hash-name-hash (resolve-doc-name doc)))))
+      (out "Fork test complete"))
+    (out "~%Now time to test publishing!")
+    (let ((s1 (new-doc "source1"))
+	  (s2 (new-doc "source2"))
+	  (s3 (new-doc "to-publish")))
+      (out "Appending content to first doc")
+      (append-text s1 "First")
+      (out "Transcluding content into second doc")
+      (transclude s2 0 s1 0 5)
+      (out "Appending content to second doc")
+      (append-text s2 "Second")
+      (out "Transcluding both into third doc")
+      (transclude s3 0 s1 0 5)
+      (transclude s3 5 s2 0 11))))

@@ -53,6 +53,13 @@ written to STDOUT."
 	((string= (car args) "link") (cli-new-link (cdr args)))
 	(T (error 'unrecognised-argument-error :verb current-cli-verb*))))
 
+(defun cli-fork (args)
+  "CLI: create a fork of an existing document (i.e. a new name for an existing document that
+can be edited independently). Arguments: the document to fork. The new name is written to
+STDOUT."
+  (check-argn args 1 "name")
+  (cli-out (fork-doc (car args))))
+
 (defun cli-new-doc (args)
   "CLI: Create a new named document. The name is written to STDOUT. No arguments."
   (check-argn args 0)
