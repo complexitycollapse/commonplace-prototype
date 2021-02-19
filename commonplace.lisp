@@ -591,7 +591,8 @@ originated from."
 	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch))))
     (when (endp map) ; if we don't need to create a new leaf then we are done
       (save-leaf migrated-to-scratch)
-      (return-from publish))
+      (if update-name (update-doc-name doc-or-doc-name (leaf-name migrated-to-scratch)))
+      (return-from publish migrated-to-scratch))
     (let* ((new-leaf (create-leaf-from-map map))
 	   (fully-migrated
 	    (migrate-scratch-spans-to-leaf migrated-to-scratch map (leaf-name new-leaf)))
@@ -602,7 +603,8 @@ originated from."
       (if update-name (update-doc-name doc-or-doc-name (leaf-name fully-migrated)))
       (let ((new-scroll (new-doc-leaf migrated-scroll-spans nil)))
 	(setf (leaf-name new-scroll) local-scroll-name+)
-	(save-leaf new-scroll)))))
+	(save-leaf new-scroll))
+      fully-migrated)))
 
 ;;; File processing
 
@@ -1042,8 +1044,7 @@ found"
       (assert (string= "FirstSecond" (ctext s2)))
       (assert (string= "FirstSecond" (ctext s3)))
       (out "Publishing third doc")
-      (let ((s3-hash (resolve-doc-name s3)))
-	(publish s3)
+      (let ((s3-hash (leaf-name (publish s3))))
 	(assert (equalp s3-hash (resolve-doc-name s3)))
       (assert (string= "First" (ctext s1)))
       (assert (string= "FirstSecond" (ctext s2)))
