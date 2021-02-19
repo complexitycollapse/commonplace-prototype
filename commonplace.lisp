@@ -426,7 +426,7 @@ defined by the spans. It is created by concatenating the content referred to by 
 (defun get-from-cache (name cache)
   (build (value (gethash name cache))
     (when (not (in-cache name cache))
-      (setf value (load-and-parse name))
+      (setf value (load-leaf name))
       (setf (gethash name cache) value))))
 
 ;;; Links
@@ -502,8 +502,8 @@ concatalink (in which case it is remapped to a span link)."
   "Append some content to the local private scroll and return the span representing it."
   (let ((scratch-path (uiop:native-namestring (name-to-path scratch-name+)))
 	(length (length content))
-	(scratch-contents (content-leaf-contents (load-and-parse scratch-name+)))
-	(scroll (load-and-parse local-scroll-name+)))
+	(scratch-contents (content-leaf-contents (load-leaf scratch-name+)))
+	(scroll (load-leaf local-scroll-name+)))
     (let* ((span-for-scroll (span scratch-name+ (length scratch-contents) length)))
       (with-open-file (s scratch-path :direction :output :if-exists :append)
 	(princ content s))
@@ -583,10 +583,8 @@ The concatatext and links of the document should be unchanged, but the doc is in
 rewritten to reference only the permanent homes of the contents, rather than the scrols they
 originated from."
   (let* ((update-name (stringp doc-or-doc-name))
-	 (doc (if (stringp doc-or-doc-name)
-		  (load-and-parse (resolve-doc-name doc-or-doc-name))
-		  doc-or-doc-name))
-	 (scroll-spans (doc-spans (load-and-parse local-scroll-name+)))
+	 (doc (if (doc-p doc-or-doc-name) doc-or-doc-name (load-leaf doc-or-doc-name)))
+	 (scroll-spans (doc-spans (load-leaf local-scroll-name+)))
 	 (migrated-to-scratch (migrate-scroll-spans-to-scroll-targets doc scroll-spans))
 	 (map (build-map-from-scratch-spans (get-scratch-spans migrated-to-scratch))))
     (when (endp map) ; if we don't need to create a new leaf then we are done
@@ -651,7 +649,7 @@ the implementation in ALEXANDRIA."
     (save-leaf (make-content-leaf :name scratch-name+ :owner user+))
     repo-path*))
 
-(defun load-and-parse (name) (parse-leaf (load-by-name name) name))
+(defun load-leaf (name) (parse-leaf (load-by-name name) name))
 
 (defun save-leaf (leaf)
   (let ((serialized (serialize-leaf leaf))
@@ -661,9 +659,9 @@ the implementation in ALEXANDRIA."
     leaf))
 
 (defun load-by-name (name)
-  (with-open-file (s (name-to-path name) :if-does-not-exist :error)
-    (if (null s) (return-from load-by-name nil))
-    (drain s)))
+  (let ((true-name (if (stringp name) (resolve-doc-name name) name)))
+    (with-open-file (s (name-to-path true-name) :if-does-not-exist :error)
+      (drain s))))
 
 (defun save-by-name (name contents)
   (with-open-file (s (name-to-path name) :direction :output :if-exists :supersede)
@@ -735,7 +733,7 @@ the implementation in ALEXANDRIA."
 
 (defun parse-link-include (link-include-line)
   (let ((name (subseq link-include-line 5)))
-    (handler-case (load-and-parse (make-hash-name :hash name))
+    (handler-case (load-leaf (make-hash-name :hash name))
       (file-error () (error 'leaf-not-found :type :leaf :name name)))))
 
 (defun parse-link (name owner contents)
@@ -984,7 +982,7 @@ found"
   (labels ((out (format-string &rest args)
 	     (apply #'format T (concatenate 'string format-string "~%") args))
 	   (ctext (name)
-	     (generate-concatatext (doc-spans (load-and-parse (resolve-doc-name name))))))
+	     (generate-concatatext (doc-spans (load-leaf name)))))
     (set-test-repo)
     (cl-fad:delete-directory-and-files repo-path* :if-does-not-exist :ignore)
     (init)

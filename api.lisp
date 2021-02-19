@@ -141,7 +141,7 @@ problems."
 	     (handler-case (if (hash-name-p name) name (resolve-doc-name name))
 	       (file-error () (error 'no-doc-with-that-name :name name)))))
 	(if (leaf-missing hash) (error 'leaf-not-found :type :doc :name hash))
-	(load-and-parse hash))))
+	(load-leaf hash))))
 
 (defun f-with-safely-loaded-doc (doc-or-doc-name fn)
   "See WITH-SAFELY-LOADED-DOC."
@@ -166,7 +166,7 @@ to an ordinary link if required."
   (typecase link-designator
     (link link-designator)
     (concatalink link-designator)
-    (string (handler-case (load-and-parse (make-hash-name :hash link-designator))
+    (string (handler-case (load-leaf (make-hash-name :hash link-designator))
 	      (file-error () (error 'leaf-not-found :name link-designator :type :link))))
     (cons (create-cclink-from-spec link-designator))
     (T (error "Invalid link designator ~S" link-designator))))
